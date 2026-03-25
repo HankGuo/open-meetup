@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# build outputs
+client/dist/
+server/dist/
+
+# runtime logs and pids
+*.log
+*.pid
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env files
+.env
+.env.*
+!.env.example
+
+# system files
+.DS_Store
+
+# temp
+.tmp/
+tmp/
+
+# local agent config
+.claude/
