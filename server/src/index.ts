@@ -23,6 +23,44 @@ app.use(express.json());
 const roomManager = new RoomManager();
 registerHandlers(io, roomManager);
 
+app.get('/api/room/check', (req, res) => {
+  const roomId = req.query.roomId as string;
+  if (!roomId) {
+    res.status(400).json({ exists: false, error: 'Room ID is required' });
+    return;
+  }
+  const normalized = roomId.trim().toUpperCase();
+  const room = roomManager.getRoom(normalized);
+  if (room) {
+    res.json({ exists: true, status: room.status });
+  } else {
+    res.json({ exists: false });
+  }
+});
+
+app.get('/api/room/ticket-check', (req, res) => {
+  const roomId = req.query.roomId as string;
+  const ticket = req.query.ticket as string;
+  if (!roomId || !ticket) {
+    res.status(400).json({ valid: false, error: 'Room ID and Ticket are required' });
+    return;
+  }
+  const normalizedRoomId = roomId.trim().toUpperCase();
+  const room = roomManager.getRoom(normalizedRoomId);
+  if (!room) {
+    res.json({ valid: false, error: 'Room not found' });
+    return;
+  }
+  const normalizedTicket = ticket.trim().toUpperCase();
+  for (const participant of room.participants.values()) {
+    if (participant.ticket?.toUpperCase() === normalizedTicket) {
+      res.json({ valid: true, userName: participant.userName });
+      return;
+    }
+  }
+  res.json({ valid: false, error: 'Invalid ticket' });
+});
+
 // 健康检查
 app.get('/health', (req, res) => {
   res.json({

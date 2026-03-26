@@ -27,6 +27,8 @@ interface RoomSyncData {
   userRole: UserRole;
   userName: string;
   sessionId: string;
+  avatar?: string;
+  ticket?: string;
 }
 
 interface LeaveRoomData {
@@ -52,11 +54,12 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   const [myUserId, setMyUserId] = useState(storedSessionRef.current?.userId ?? '');
   const [myRole, setMyRole] = useState<UserRole>('participant');
   const [myName, setMyName] = useState('');
+  const [myTicket, setMyTicket] = useState('');
   const [sessionId, setSessionId] = useState(storedSessionRef.current?.sessionId ?? '');
   const [roomId, setRoomId] = useState('');
   const [participants, setParticipants] = useState<User[]>([]);
   const [hostId, setHostId] = useState('');
-  const [status, setStatus] = useState<MeetingStatus>('idle');
+  const [status, setStatus] = useState<MeetingStatus>('active');
   const [currentStep, setCurrentStep] = useState(0);
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [isReconnecting, setIsReconnecting] = useState(Boolean(storedSessionRef.current));
@@ -70,7 +73,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     setRoomId('');
     setParticipants([]);
     setHostId('');
-    setStatus('idle');
+    setStatus('ended');
     setCurrentStep(0);
     setMyRole('participant');
     setMyName('');
@@ -81,6 +84,8 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     clearStoredSession();
     setMyUserId('');
     setSessionId('');
+    localStorage.removeItem('open-meetup:isHost');
+    localStorage.removeItem('open-meetup:hostRoomId');
   }, []);
 
   const persistSession = useCallback((credentials: SessionCredentials) => {
@@ -101,6 +106,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       setMyRole(data.userRole);
       setMyName(data.userName);
       setSessionId(data.sessionId);
+      setMyTicket(data.ticket || '');
       persistSession({
         roomId: data.roomId,
         userId: data.userId,
@@ -118,7 +124,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   const handleReconnectFailure = useCallback(
     (errorData?: SocketError) => {
       const code = errorData?.code;
-      if (code === 'ROOM_NOT_FOUND' || code === 'SESSION_EXPIRED' || code === 'USER_NOT_FOUND' || code === 'ROOM_CLOSED') {
+      if (code === 'ROOM_NOT_FOUND' || code === 'SESSION_EXPIRED' || code === 'USER_NOT_FOUND' || code === 'ROOM_CLOSED' || code === 'BAD_REQUEST') {
         clearSession();
         resetRoomState();
       }
@@ -176,13 +182,13 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   }, [applySyncData, handleReconnectFailure, safeEmit]);
 
   const createRoom = useCallback(
-    async (userName: string): Promise<boolean> => {
+    async (userName: string, roomId: string, password: string): Promise<boolean> => {
       if (!isConnected) {
         setError('未连接到服务器，请稍后再试');
         return false;
       }
 
-      const response = (await safeEmit('room:create', { userName })) as SocketResponse<RoomSyncData> | null;
+      const response = (await safeEmit('room:create', { userName, roomId, password })) as SocketResponse<RoomSyncData> | null;
       if (!response) {
         return false;
       }
@@ -192,13 +198,15 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       }
 
       applySyncData(response.data);
+      localStorage.setItem('open-meetup:isHost', 'true');
+      localStorage.setItem('open-meetup:hostRoomId', response.data.roomId);
       return true;
     },
     [applySyncData, handleSocketFailure, isConnected, safeEmit],
   );
 
   const joinRoom = useCallback(
-    async (roomIdToJoin: string, userName: string): Promise<boolean> => {
+    async (roomIdToJoin: string, userName: string, ticket?: string, avatar?: string): Promise<boolean> => {
       if (!isConnected) {
         setError('未连接到服务器，请稍后再试');
         return false;
@@ -207,6 +215,8 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       const response = (await safeEmit('room:join', {
         roomId: roomIdToJoin,
         userName,
+        ticket,
+        avatar,
       })) as SocketResponse<RoomSyncData> | null;
       if (!response) {
         return false;
@@ -217,6 +227,9 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       }
 
       applySyncData(response.data);
+      if (response.data.ticket) {
+        localStorage.setItem('open-meetup:ticket', response.data.ticket);
+      }
       return true;
     },
     [applySyncData, handleSocketFailure, isConnected, safeEmit],
@@ -256,20 +269,48 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     return true;
   }, [clearSession, handleSocketFailure, isConnected, resetRoomState, safeEmit]);
 
-  const startMeeting = useCallback(async (): Promise<boolean> => {
-    const response = (await safeEmit('control:start', {})) as SocketResponse<null> | null;
+  const endRoom = useCallback(async (): Promise<boolean> => {
+    const session = sessionRef.current;
+    if (!session) {
+      resetRoomState();
+      clearSession();
+      return true;
+    }
+
+    if (!isConnected) {
+      resetRoomState();
+      clearSession();
+      return true;
+    }
+
+    const response = (await safeEmit('room:end', {})) as SocketResponse<{ closed: boolean }> | null;
     if (!response) {
       return false;
     }
     if (!response.success) {
-      handleSocketFailure(response.error, '开始会议失败');
+      handleSocketFailure(response.error, '结束房间失败');
+      return false;
+    }
+
+    resetRoomState();
+    clearSession();
+    return true;
+  }, [clearSession, handleSocketFailure, isConnected, resetRoomState, safeEmit]);
+
+  const nextStep = useCallback(async (): Promise<boolean> => {
+    const response = (await safeEmit('control:next', {})) as SocketResponse<null> | null;
+    if (!response) {
+      return false;
+    }
+    if (!response.success) {
+      handleSocketFailure(response.error, '切换步骤失败');
       return false;
     }
     return true;
   }, [handleSocketFailure, safeEmit]);
 
-  const nextStep = useCallback(async (): Promise<boolean> => {
-    const response = (await safeEmit('control:next', {})) as SocketResponse<null> | null;
+  const prevStep = useCallback(async (): Promise<boolean> => {
+    const response = (await safeEmit('control:prev', {})) as SocketResponse<null> | null;
     if (!response) {
       return false;
     }
@@ -405,6 +446,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     myUserId,
     myRole,
     myName,
+    myTicket,
     sessionId,
     isConnected,
     isReconnecting,
@@ -412,7 +454,8 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     createRoom,
     joinRoom,
     leaveRoom,
-    startMeeting,
+    endRoom,
+    prevStep,
     nextStep,
     endMeeting,
     clearError,

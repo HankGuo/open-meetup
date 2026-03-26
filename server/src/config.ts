@@ -1,0 +1,1 @@
+export const HOST_PASSWORD = process.env.HOST_PASSWORD || '12345678';

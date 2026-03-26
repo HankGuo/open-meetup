@@ -1,27 +1,33 @@
 # Open Meetup
 
-> 一个开源的实时会议协作 Demo，基于 **React + Socket.IO + TypeScript**。  
-> 支持多人加入、主持人流程控制、断线重连与会话恢复。
+> 一个交互式演示工具，基于 **React + Socket.IO + TypeScript**。
+> 支持主持人控制演示流程、参与者实时同步、Ticket 验证系统。
 
 ## ✨ 核心能力
 
-- 实时创建 / 加入会议（6 位房间号）
-- 主持人流程控制（开始、下一步、结束）
-- 服务端鉴权（`roomId + userId + sessionId`）
-- 断线自动重连与会话恢复（`localStorage` 持久化会话）
-- 在线 / 离线状态同步
-- 房间生命周期管理（主持人离开 / 超时自动关闭）
+- **交互式演示**：5 页内容由主持人统一控场
+  1. 欢迎开场致辞
+  2. HELLO 黑客松详情介绍
+  3. 新闻资讯
+  4. 重新认识你的豆包
+  5. 自我介绍环节
+- **房间管理**：授权口令创建房间、单房间存活机制
+- **Ticket 系统**：首次加入分配唯一 Ticket，验证后快速入场
+- **电子名片**：头像上传，自我介绍环节展示参与者 Grid
+- **扫码入会**：二维码 + 链接分享，Ticket 用户一键加入
+- **断线重连**：localStorage 持久化会话，自动恢复连接
+- **状态同步**：在线/离线实时更新
 
-## 🔐 安全与稳定性设计
+## 🔐 安全设计
 
-- 服务端不信任客户端 `hostId`，主持权限统一在服务端判断
-- 重连必须携带合法 `sessionId`，避免身份伪造
-- Socket ACK 超时保护，避免前端请求无响应卡死
-- 离线用户宽限清理（默认 2 分钟），防止脏会话长期占用房间
+- 主持人权限由服务端判定，客户端不可伪造
+- Ticket 验证在服务端完成
+- 重连必须携带合法 `sessionId`
+- Socket ACK 超时保护
 
 ## 🧱 技术栈
 
-- **Client**: React 18、Vite 5、TypeScript、TailwindCSS、Socket.IO Client
+- **Client**: React 18、Vite 5、TypeScript、TailwindCSS、Socket.IO Client、qrcode.react
 - **Server**: Node.js、Express、Socket.IO、TypeScript
 
 ## 🏗️ 架构概览
@@ -31,25 +37,23 @@ flowchart LR
   U1[Host 浏览器] -- Socket.IO --> S[Open Meetup Server]
   U2[Participant 浏览器] -- Socket.IO --> S
   S --> RM[RoomManager\n房间状态/鉴权/生命周期]
-  S --> API[/GET /health/]
+  S --> API[/api/room/*]
 ```
 
 ## 🚀 快速开始
 
-### 1) 环境要求
+### 环境要求
 
 - Node.js **>= 18**
 - npm **>= 9**
 
-### 2) 安装依赖
-
-在项目根目录执行：
+### 安装依赖
 
 ```bash
 npm install
 ```
 
-### 3) 启动开发环境
+### 启动开发环境
 
 ```bash
 npm run dev
@@ -61,7 +65,7 @@ npm run dev
 - 后端：`http://localhost:3001`
 - 健康检查：`http://localhost:3001/health`
 
-### 4) 构建
+### 构建
 
 ```bash
 npm run build
@@ -69,11 +73,22 @@ npm run build
 
 ## 🧪 典型使用流程
 
-1. 主持人在首页输入昵称，创建房间
-2. 分享 6 位房间号给参与者
-3. 参与者输入昵称 + 房间号加入
-4. 主持人点击「开始会议」后推进步骤
-5. 若网络闪断，页面会自动尝试会话恢复
+### 主持人
+
+1. 访问首页，输入授权口令（默认：`12345678`）
+2. 指定 6 位房间号，创建房间
+3. 点击「扫码加入」分享二维码给参与者
+4. 使用左右按钮控制演示页面进度
+5. 点击「结束房间」可关闭房间
+
+### 参与者
+
+1. 扫描主持人分享的二维码或访问链接
+2. 选择入场方式：
+   - **首次加入**：填写昵称 + 上传电子名片 → 系统分配 Ticket
+   - **有 Ticket**：输入 Ticket 编号 → 验证后直接入场
+3. 跟随主持人浏览 5 页内容
+4. 第 5 页可查看所有参与者头像 Grid
 
 ## ⚙️ 环境变量
 
@@ -83,6 +98,7 @@ npm run build
 | --- | --- | --- |
 | `PORT` | `3001` | 服务端端口 |
 | `HOST` | `0.0.0.0` | 服务监听地址 |
+| `HOST_PASSWORD` | `12345678` | 创建房间授权口令 |
 
 ### Client
 
@@ -123,67 +139,70 @@ npm run build
 
 ### Client → Server
 
-- `room:create`
-- `room:join`
-- `room:reconnect`
-- `room:leave`
-- `control:start`
-- `control:next`
-- `control:end`
-- `state:sync-request`
+- `room:create` - 创建房间（需授权口令）
+- `room:join` - 加入房间
+- `room:reconnect` - 断线重连
+- `room:leave` - 离开房间
+- `room:end` - 结束房间（仅主持人）
+- `control:next` - 下一页
+- `control:prev` - 上一页
 
 ### Server → Client
 
-- `session:restored`
-- `room:user-joined`
-- `room:user-left`
-- `room:user-online`
-- `room:user-offline`
-- `state:sync`
-- `control:started`
-- `control:next`
-- `control:ended`
-- `room:closed`
+- `session:restored` - 会话恢复结果
+- `room:user-joined` - 用户加入
+- `room:user-left` - 用户离开
+- `room:closed` - 房间关闭
+- `state:sync` - 状态同步
+
+## 🌐 REST API
+
+| 端点 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/room/check` | GET | 验证房间是否存在 |
+| `/api/room/ticket-check` | GET | 验证 Ticket 有效性 |
+| `/health` | GET | 服务健康检查 |
+
+### API 示例
+
+```bash
+# 检查房间是否存在
+curl "http://localhost:3001/api/room/check?roomId=ABC123"
+
+# 验证 Ticket
+curl "http://localhost:3001/api/room/ticket-check?roomId=ABC123&ticket=TKT-XYZ789"
+```
 
 ## ❗ 常见错误码
 
-- `BAD_REQUEST`
-- `ROOM_NOT_FOUND`
-- `ROOM_CLOSED`
-- `ROOM_FULL`
-- `NOT_AUTHENTICATED`
-- `NOT_AUTHORIZED`
-- `SESSION_EXPIRED`
-- `MEETING_NOT_ACTIVE`
-- `USER_NOT_FOUND`
-- `INTERNAL_ERROR`
+- `BAD_REQUEST` - 参数无效
+- `ROOM_EXISTS` - 房间已存在（单房间模式）
+- `ROOM_NOT_FOUND` - 房间不存在
+- `ROOM_CLOSED` - 房间已关闭
+- `INVALID_PASSWORD` - 授权口令错误
+- `NOT_AUTHENTICATED` - 未认证
+- `NOT_AUTHORIZED` - 无权限
+- `SESSION_EXPIRED` - 会话过期
 
 ## 📁 项目结构
 
 ```text
 open-meetup/
 ├── client/                 # React 前端
+│   └── src/
+│       ├── components/     # 页面组件
+│       ├── context/        # MeetingContext 状态管理
+│       ├── pages/          # HostPage, ParticipantPage
+│       └── socket.ts       # Socket.IO 封装
 ├── server/                 # Express + Socket.IO 服务端
+│   └── src/
+│       ├── handlers.ts     # Socket 事件处理
+│       ├── roomManager.ts  # 房间状态管理
+│       └── index.ts        # HTTP API
 ├── package.json            # workspace 入口脚本
 ├── LICENSE
 └── README.md
 ```
-
-## 🗺️ Roadmap（欢迎共建）
-
-- [ ] 邀请链接与密码房间
-- [ ] 会议记录与回放
-- [ ] 单元测试 / E2E 测试
-- [ ] Docker 一键部署
-
-## 🤝 贡献
-
-欢迎提 Issue / PR：
-
-1. Fork 仓库
-2. 新建分支（`feat/xxx`）
-3. 提交变更并附说明
-4. 发起 Pull Request
 
 ## 📄 开源许可
 

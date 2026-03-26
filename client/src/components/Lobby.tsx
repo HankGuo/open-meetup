@@ -3,10 +3,10 @@ import { useMeeting } from '../context/MeetingContext';
 import { Wifi, WifiOff } from 'lucide-react';
 
 export function Lobby() {
-  const { createRoom, joinRoom, isConnected, isReconnecting, error, clearError } = useMeeting();
-  const [mode, setMode] = useState<'create' | 'join'>('create');
+  const { createRoom, isConnected, isReconnecting, error, clearError } = useMeeting();
   const [userName, setUserName] = useState('');
-  const [roomIdInput, setRoomIdInput] = useState('');
+  const [roomId, setRoomId] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleCreateRoom() {
@@ -14,30 +14,20 @@ export function Lobby() {
       alert('请输入您的姓名');
       return;
     }
-    clearError();
-    setLoading(true);
-    const success = await createRoom(userName.trim());
-    setLoading(false);
-    if (!success) {
-      // Error is already set in context
-    }
-  }
-
-  async function handleJoinRoom() {
-    if (!userName.trim()) {
-      alert('请输入您的姓名');
-      return;
-    }
-    if (!roomIdInput.trim()) {
+    if (!roomId.trim()) {
       alert('请输入房间ID');
       return;
     }
+    if (!password.trim()) {
+      alert('请输入授权口令');
+      return;
+    }
     clearError();
     setLoading(true);
-    const success = await joinRoom(roomIdInput.trim().toUpperCase(), userName.trim());
+    const success = await createRoom(userName.trim(), roomId.trim().toUpperCase(), password.trim());
     setLoading(false);
     if (!success) {
-      // Error is already set in context
+      setPassword('');
     }
   }
 
@@ -63,29 +53,6 @@ export function Lobby() {
           </div>
         )}
 
-        <div className="flex mb-6 border rounded-lg overflow-hidden">
-          <button
-            className={`flex-1 py-2 text-sm font-medium ${
-              mode === 'create'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-            onClick={() => setMode('create')}
-          >
-            创建会议
-          </button>
-          <button
-            className={`flex-1 py-2 text-sm font-medium ${
-              mode === 'join'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-            onClick={() => setMode('join')}
-          >
-            加入会议
-          </button>
-        </div>
-
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -100,39 +67,39 @@ export function Lobby() {
             />
           </div>
 
-          {mode === 'join' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                房间ID
-              </label>
-              <input
-                type="text"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="例如: ABC123"
-                value={roomIdInput}
-                onChange={(e) => setRoomIdInput(e.target.value.toUpperCase())}
-                maxLength={6}
-              />
-            </div>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              房间ID
+            </label>
+            <input
+              type="text"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="请输入房间ID"
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+            />
+          </div>
 
-          {mode === 'create' ? (
-            <button
-              className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-md transition-colors"
-              onClick={handleCreateRoom}
-              disabled={loading || !isConnected || isReconnecting}
-            >
-              {loading ? '创建中...' : '创建新会议'}
-            </button>
-          ) : (
-            <button
-              className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-md transition-colors"
-              onClick={handleJoinRoom}
-              disabled={loading || !isConnected || isReconnecting}
-            >
-              {loading ? '加入中...' : '加入会议'}
-            </button>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              授权口令
+            </label>
+            <input
+              type="password"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="请输入授权口令"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+
+          <button
+            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-md transition-colors"
+            onClick={handleCreateRoom}
+            disabled={loading || !isConnected || isReconnecting}
+          >
+            {loading ? '创建中...' : '创建新会议'}
+          </button>
         </div>
 
         <div className="mt-6 text-center text-sm text-gray-500">

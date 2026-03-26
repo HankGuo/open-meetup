@@ -10,6 +10,7 @@ import {
   SocketIdentity,
   SocketResult,
 } from './types';
+import { HOST_PASSWORD } from './config';
 
 const ROOM_ID_LENGTH = 6;
 const ROOM_ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -57,15 +58,42 @@ export class RoomManager {
     return this.rooms.size;
   }
 
-  createRoom(hostUserName: string, socketId: string): SocketResult<RoomStateSync> {
+  getRoom(roomId: string): Room | null {
+    return this.rooms.get(roomId) || null;
+  }
+
+  createRoom(
+    hostUserName: string,
+    roomIdInput: string,
+    password: string,
+    socketId: string,
+    avatar?: string,
+  ): SocketResult<RoomStateSync> {
+    if (this.rooms.size > 0) {
+      return this.fail('A room already exists. Please end the current room first.', 'ROOM_EXISTS');
+    }
+
     const userName = sanitizeUserName(hostUserName);
+    const roomId = roomIdInput?.toUpperCase().trim();
+
     if (!userName) {
       return this.fail('Name is required', 'BAD_REQUEST');
     }
 
+    if (!roomId) {
+      return this.fail('Room ID is required', 'BAD_REQUEST');
+    }
+
+    if (password !== HOST_PASSWORD) {
+      return this.fail('Invalid password', 'INVALID_PASSWORD');
+    }
+
+    if (this.rooms.has(roomId)) {
+      return this.fail('Room already exists', 'ROOM_EXISTS');
+    }
+
     this.detachSocket(socketId);
 
-    const roomId = this.generateRoomId();
     const now = Date.now();
     const host: RoomParticipant = {
       userId: randomUUID(),
@@ -76,13 +104,15 @@ export class RoomManager {
       socketId,
       online: true,
       lastSeenAt: now,
+      avatar,
+      ticket: 'HOST-' + randomUUID().substring(0, 8).toUpperCase(),
     };
 
     const room: Room = {
       roomId,
       hostId: host.userId,
       participants: new Map([[host.userId, host]]),
-      status: 'idle',
+      status: 'active',
       currentStep: 0,
       createdAt: now,
       updatedAt: now,
@@ -101,7 +131,13 @@ export class RoomManager {
     };
   }
 
-  joinRoom(roomIdInput: string, userNameInput: string, socketId: string): SocketResult<RoomStateSync> {
+  joinRoom(
+    roomIdInput: string,
+    userNameInput: string,
+    socketId: string,
+    avatar?: string,
+    ticket?: string,
+  ): SocketResult<RoomStateSync> {
     const roomId = normalizeRoomId(roomIdInput);
     const userName = sanitizeUserName(userNameInput);
 
@@ -132,6 +168,8 @@ export class RoomManager {
       socketId,
       online: true,
       lastSeenAt: now,
+      avatar,
+      ticket: ticket || 'TKT-' + randomUUID().substring(0, 8).toUpperCase(),
     };
 
     room.participants.set(participant.userId, participant);
@@ -265,12 +303,29 @@ export class RoomManager {
     if (auth.participant.role !== 'host') {
       return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
     }
-    if (auth.room.status !== 'active') {
-      return this.fail('Meeting is not active', 'MEETING_NOT_ACTIVE');
-    }
 
     auth.room.currentStep += 1;
     auth.room.updatedAt = Date.now();
+
+    return {
+      success: true,
+      data: this.buildPublicRoomSnapshot(auth.room),
+    };
+  }
+
+  prevStep(identity: SocketIdentity): RoomOperationResult {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+    }
+
+    if (auth.room.currentStep > 0) {
+      auth.room.currentStep -= 1;
+      auth.room.updatedAt = Date.now();
+    }
 
     return {
       success: true,
@@ -293,6 +348,31 @@ export class RoomManager {
     return {
       success: true,
       data: this.buildPublicRoomSnapshot(auth.room),
+    };
+  }
+
+  forceEndRoom(identity: SocketIdentity): SocketResult<{ closed: boolean }> {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+    }
+
+    const roomId = auth.room.roomId;
+
+    for (const [socketId, id] of this.socketToIdentity.entries()) {
+      if (id.roomId === roomId) {
+        this.socketToIdentity.delete(socketId);
+      }
+    }
+
+    this.rooms.delete(roomId);
+
+    return {
+      success: true,
+      data: { closed: true },
     };
   }
 
@@ -475,6 +555,8 @@ export class RoomManager {
       userRole: me.role,
       userName: me.userName,
       sessionId: me.sessionId,
+      avatar: me.avatar,
+      ticket: me.ticket,
     };
   }
 
@@ -497,6 +579,8 @@ export class RoomManager {
       joinedAt: participant.joinedAt,
       online: participant.online,
       lastSeenAt: participant.lastSeenAt,
+      avatar: participant.avatar,
+      ticket: participant.ticket,
     };
   }
 

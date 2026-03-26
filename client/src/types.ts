@@ -1,5 +1,5 @@
 export type UserRole = 'host' | 'participant';
-export type MeetingStatus = 'idle' | 'active' | 'ended';
+export type MeetingStatus = 'active' | 'ended';
 
 export interface User {
   userId: string;
@@ -8,6 +8,8 @@ export interface User {
   joinedAt: number;
   online: boolean;
   lastSeenAt: number;
+  avatar?: string;
+  ticket?: string;
 }
 
 export interface RoomState {
@@ -22,23 +24,26 @@ export interface SessionCredentials {
   roomId: string;
   userId: string;
   sessionId: string;
+  ticket?: string;
 }
 
 export interface MeetingContextType extends RoomState {
   myUserId: string;
   myRole: UserRole;
   myName: string;
+  myTicket: string;
   sessionId: string;
   isConnected: boolean;
   isReconnecting: boolean;
   error: string | null;
 
   // Actions
-  createRoom: (userName: string) => Promise<boolean>;
-  joinRoom: (roomId: string, userName: string) => Promise<boolean>;
+  createRoom: (userName: string, roomId: string, password: string, avatar?: string) => Promise<boolean>;
+  joinRoom: (roomId: string, userName: string, ticket?: string, avatar?: string) => Promise<boolean>;
   leaveRoom: () => Promise<boolean>;
-  startMeeting: () => Promise<boolean>;
+  endRoom: () => Promise<boolean>;
   nextStep: () => Promise<boolean>;
+  prevStep: () => Promise<boolean>;
   endMeeting: () => Promise<boolean>;
   clearError: () => void;
 }

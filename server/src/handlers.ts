@@ -11,11 +11,16 @@ interface SocketData {
 
 interface CreateRoomPayload {
   userName: string;
+  roomId: string;
+  password: string;
+  avatar?: string;
 }
 
 interface JoinRoomPayload {
   roomId: string;
   userName: string;
+  avatar?: string;
+  ticket?: string;
 }
 
 interface ReconnectPayload {
@@ -60,9 +65,34 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       }
     }
 
+    socket.on('room:check', (payload: { roomId: string }, callback?: AckFn<SocketResult<{ exists: boolean; status?: string }>>) => {
+      try {
+        const roomId = payload?.roomId?.trim().toUpperCase();
+        if (!roomId) {
+          ack(callback, { success: false, error: { message: 'Invalid room id', code: 'BAD_REQUEST' } });
+          return;
+        }
+        const room = roomManager.getRoom(roomId);
+        if (room) {
+          ack(callback, { success: true, data: { exists: true, status: room.status } });
+        } else {
+          ack(callback, { success: true, data: { exists: false } });
+        }
+      } catch (error) {
+        console.error('[Socket] room:check error:', error);
+        ack(callback, { success: false, error: { message: 'Failed to check room', code: 'INTERNAL_ERROR' } });
+      }
+    });
+
     socket.on('room:create', (payload: CreateRoomPayload, callback?: AckFn<SocketResult<unknown>>) => {
       try {
-        const result = roomManager.createRoom(payload?.userName ?? '', socket.id);
+        const result = roomManager.createRoom(
+          payload?.userName ?? '',
+          payload?.roomId ?? '',
+          payload?.password ?? '',
+          socket.id,
+          payload?.avatar,
+        );
         if (!result.success) {
           ack(callback, result);
           return;
@@ -84,7 +114,13 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
 
     socket.on('room:join', (payload: JoinRoomPayload, callback?: AckFn<SocketResult<unknown>>) => {
       try {
-        const result = roomManager.joinRoom(payload?.roomId ?? '', payload?.userName ?? '', socket.id);
+        const result = roomManager.joinRoom(
+          payload?.roomId ?? '',
+          payload?.userName ?? '',
+          socket.id,
+          payload?.avatar,
+          payload?.ticket,
+        );
         if (!result.success) {
           ack(callback, result);
           return;
@@ -179,6 +215,32 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       }
     });
 
+    socket.on('room:end', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
+      try {
+        const identity = getSocketIdentity(socket);
+        if (!identity) {
+          ack(callback, failure('Not in a room', 'NOT_AUTHENTICATED'));
+          return;
+        }
+
+        const result = roomManager.forceEndRoom(identity);
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
+
+        clearSocketIdentity(socket);
+        socket.leave(identity.roomId);
+        io.to(identity.roomId).emit('room:closed', { reason: 'host_ended' });
+        io.in(identity.roomId).socketsLeave(identity.roomId);
+
+        ack(callback, result);
+      } catch (error) {
+        console.error('[Socket] room:end error:', error);
+        ack(callback, failure('Failed to end room', 'INTERNAL_ERROR'));
+      }
+    });
+
     socket.on('control:start', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
       const identity = getSocketIdentity(socket);
       if (!identity) {
@@ -214,6 +276,26 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       }
 
       io.to(result.data.roomId).emit('control:next', {
+        currentStep: result.data.currentStep,
+      });
+      broadcastRoomState(io, roomManager, result.data.roomId);
+      ack(callback, { success: true, data: null });
+    });
+
+    socket.on('control:prev', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
+      const identity = getSocketIdentity(socket);
+      if (!identity) {
+        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+        return;
+      }
+
+      const result = roomManager.prevStep(identity);
+      if (!result.success) {
+        ack(callback, result);
+        return;
+      }
+
+      io.to(result.data.roomId).emit('control:prev', {
         currentStep: result.data.currentStep,
       });
       broadcastRoomState(io, roomManager, result.data.roomId);

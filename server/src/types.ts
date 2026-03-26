@@ -1,5 +1,5 @@
 export type UserRole = 'host' | 'participant';
-export type MeetingStatus = 'idle' | 'active' | 'ended';
+export type MeetingStatus = 'active' | 'ended';
 
 export type RoomCloseReason = 'HOST_LEFT' | 'HOST_TIMEOUT' | 'ROOM_EXPIRED';
 
@@ -12,6 +12,8 @@ export interface RoomParticipant {
   socketId: string | null;
   online: boolean;
   lastSeenAt: number;
+  avatar?: string;
+  ticket?: string;
 }
 
 export interface PublicParticipant {
@@ -21,6 +23,8 @@ export interface PublicParticipant {
   joinedAt: number;
   online: boolean;
   lastSeenAt: number;
+  avatar?: string;
+  ticket?: string;
 }
 
 export interface Room {
@@ -43,6 +47,8 @@ export interface RoomStateSync {
   userRole: UserRole;
   userName: string;
   sessionId: string;
+  avatar?: string;
+  ticket?: string;
 }
 
 export interface SocketIdentity {
@@ -55,6 +61,8 @@ export interface ErrorResponse {
   message: string;
   code:
     | 'BAD_REQUEST'
+    | 'INVALID_PASSWORD'
+    | 'ROOM_EXISTS'
     | 'ROOM_NOT_FOUND'
     | 'ROOM_CLOSED'
     | 'ROOM_FULL'
