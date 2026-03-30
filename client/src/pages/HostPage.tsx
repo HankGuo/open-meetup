@@ -1,15 +1,13 @@
+import { useState } from 'react';
 import { useMeeting } from '../context/MeetingContext';
 import { MeetingStage } from '../components/MeetingStage';
 import { HostControls } from '../components/HostControls';
-import { LogOut, QrCode, XCircle } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
-import { useState } from 'react';
+import { HostSetupBoard } from '../components/HostSetupBoard';
+import { ArrowLeftCircle, LogOut, XCircle } from 'lucide-react';
 
 export function HostPage() {
-  const { roomId, leaveRoom, endRoom, myTicket } = useMeeting();
-  const [showQR, setShowQR] = useState(false);
-
-  const joinUrl = `${window.location.origin}?room=${roomId}`;
+  const { leaveRoom, endRoom, phase, returnToSetup, pages, currentStep } = useMeeting();
+  const [setupFocusPageId, setSetupFocusPageId] = useState<string | null>(null);
 
   async function handleEndRoom() {
     if (!confirm('确定要结束房间吗？结束后所有用户都将被退出。')) {
@@ -18,23 +16,31 @@ export function HostPage() {
     await endRoom();
   }
 
+  async function handleReturnToSetup() {
+    const focusedPageId = pages[currentStep]?.id || null;
+    setSetupFocusPageId(focusedPageId);
+    await returnToSetup();
+  }
+
   return (
-    <div className="min-h-screen bg-gray-900 relative">
-      <MeetingStage />
+    <div className="h-full w-full overflow-hidden flex flex-col bg-gray-900">
+      {phase === 'setup' ? <HostSetupBoard defaultSelectedPageId={setupFocusPageId} /> : <MeetingStage />}
 
-      <HostControls />
+      {phase === 'live' ? <HostControls /> : null}
 
-      <button
-        onClick={() => setShowQR(true)}
-        className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-md transition-colors"
-      >
-        <QrCode className="w-4 h-4" />
-        扫码加入
-      </button>
+      {phase === 'live' ? (
+        <button
+          onClick={handleReturnToSetup}
+          className="absolute right-40 top-20 z-30 flex items-center gap-2 rounded-md bg-amber-500/90 px-4 py-2 text-white transition-colors hover:bg-amber-500"
+        >
+          <ArrowLeftCircle className="h-4 w-4" />
+          返回编辑页
+        </button>
+      ) : null}
 
       <button
         onClick={handleEndRoom}
-        className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-md transition-colors"
+        className="absolute right-4 top-20 z-30 flex items-center gap-2 rounded-md bg-red-600/80 px-4 py-2 text-white transition-colors hover:bg-red-600"
       >
         <XCircle className="w-4 h-4" />
         结束房间
@@ -42,52 +48,11 @@ export function HostPage() {
 
       <button
         onClick={() => void leaveRoom()}
-        className="absolute top-4 right-36 flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-md transition-colors"
+        className="absolute left-4 top-20 z-30 flex items-center gap-2 rounded-md bg-white/10 px-4 py-2 text-white transition-colors hover:bg-white/20"
       >
         <LogOut className="w-4 h-4" />
         退出
       </button>
-
-      <div className="absolute bottom-4 left-4 text-white/50 text-sm">
-        {myTicket && <span>您的Ticket: {myTicket}</span>}
-      </div>
-
-      {showQR && (
-        <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowQR(false)}
-        >
-          <div className="bg-white rounded-2xl p-8 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-900">扫码加入会议</h3>
-              <button
-                onClick={() => setShowQR(false)}
-                className="p-2 hover:bg-gray-100 rounded-full"
-              >
-                <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center">
-              <div className="p-4 bg-white rounded-xl shadow-inner mb-4">
-                <QRCodeSVG value={joinUrl} size={200} level="H" />
-              </div>
-
-              <p className="text-2xl font-bold text-indigo-600 tracking-wider mb-2">{roomId}</p>
-              <p className="text-sm text-gray-500 mb-4">房间ID</p>
-
-              <p className="text-xs text-gray-400 text-center">
-                使用微信或其他扫码工具<br />或访问以下链接
-              </p>
-              <p className="text-sm text-indigo-600 break-all mt-2 font-mono">
-                {joinUrl}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

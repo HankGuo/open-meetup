@@ -29,17 +29,6 @@ export function getSocket(): Socket {
   return socket;
 }
 
-export function disconnectSocket() {
-  if (socket) {
-    socket.disconnect();
-  }
-}
-
-export function setSocketAuth(auth: Partial<SessionCredentials> | null) {
-  const currentSocket = getSocket();
-  currentSocket.auth = auth ?? {};
-}
-
 export function emitWithAck<T>(
   event: string,
   payload?: unknown,

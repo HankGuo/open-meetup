@@ -11,19 +11,16 @@
   3. 新闻资讯
   4. 重新认识你的豆包
   5. 自我介绍环节
-- **房间管理**：授权口令创建房间、单房间存活机制
+- **单房间机制**：系统运行期间有且只有一个有效房间
 - **Ticket 系统**：首次加入分配唯一 Ticket，验证后快速入场
 - **电子名片**：头像上传，自我介绍环节展示参与者 Grid
 - **扫码入会**：二维码 + 链接分享，Ticket 用户一键加入
-- **断线重连**：localStorage 持久化会话，自动恢复连接
-- **状态同步**：在线/离线实时更新
 
 ## 🔐 安全设计
 
 - 主持人权限由服务端判定，客户端不可伪造
 - Ticket 验证在服务端完成
-- 重连必须携带合法 `sessionId`
-- Socket ACK 超时保护
+- 授权口令创建房间
 
 ## 🧱 技术栈
 
@@ -50,160 +47,204 @@ flowchart LR
 ### 安装依赖
 
 ```bash
-npm install
+npm run install:all
 ```
 
-### 启动开发环境
+### 启动开发服务器
 
 ```bash
 npm run dev
 ```
 
-默认地址：
+- 服务器运行在 http://localhost:3001
+- 前端运行在 http://localhost:5173
 
-- 前端：`http://localhost:5173`
-- 后端：`http://localhost:3001`
-- 健康检查：`http://localhost:3001/health`
-
-### 构建
+### 构建生产版本
 
 ```bash
 npm run build
 ```
 
-## 🧪 典型使用流程
+## 📋 概念说明
 
-### 主持人
+### Title（标题）
 
-1. 访问首页，输入授权口令（默认：`12345678`）
-2. 指定 6 位房间号，创建房间
-3. 点击「扫码加入」分享二维码给参与者
-4. 使用左右按钮控制演示页面进度
-5. 点击「结束房间」可关闭房间
+- Title 是房间的显示名称，由主持人在创建房间时指定
+- 当前系统为**单房间模型**，不再暴露 RoomID 概念
 
-### 参与者
+### 单房间原则
 
-1. 扫描主持人分享的二维码或访问链接
-2. 选择入场方式：
-   - **首次加入**：填写昵称 + 上传电子名片 → 系统分配 Ticket
-   - **有 Ticket**：输入 Ticket 编号 → 验证后直接入场
-3. 跟随主持人浏览 5 页内容
-4. 第 5 页可查看所有参与者头像 Grid
+- 系统运行期间，**有且只有一个有效房间**存在
+- 当前已有房间时，新的创建请求会被拒绝（需先结束当前房间）
+- 房间结束（主持人点击"结束房间"或所有参与者离开）后，系统恢复无房间状态
 
-## ⚙️ 环境变量
+### 参与者与房间关系
 
-### Server
+- 参与者与房间 ID **不存在任何直接关联**
+- 参与者仅与当前唯一有效的房间建立连接关系
+- 用户通过 Ticket 或首次加入方式进入当前房间
 
-| 变量名 | 默认值 | 说明 |
-| --- | --- | --- |
-| `PORT` | `3001` | 服务端端口 |
-| `HOST` | `0.0.0.0` | 服务监听地址 |
-| `HOST_PASSWORD` | `12345678` | 创建房间授权口令 |
+### Ticket 系统
 
-### Client
+- **首次加入**：填写昵称 + 上传头像 → 系统分配唯一 Ticket → 存储在 localStorage
+- **Ticket 复用**：有 Ticket 用户直接输入 Ticket 快速加入
+- Ticket 用于标识用户身份，支持断线重连
 
-| 变量名 | 默认值 | 说明 |
-| --- | --- | --- |
-| `VITE_SERVER_URL` | `http://localhost:3001` | Socket/HTTP 服务端地址 |
-| `VITE_SOCKET_ACK_TIMEOUT_MS` | `6000` | Socket ACK 超时毫秒数 |
+## 🎯 用户流程
 
-## 📜 脚本说明
+### 主持人流程
 
-### 根目录
+1. 访问首页 → 系统检测无房间 → 显示创建房间表单
+2. 填写 **Title（标题）**、**昵称**、**授权口令** → 创建房间
+3. 进入主持人控制台 → 控制 5 页演示内容
+4. 点击"结束房间"可关闭房间
 
-| 命令 | 说明 |
-| --- | --- |
-| `npm run dev` | 同时启动前后端开发服务 |
-| `npm run dev:server` | 启动后端开发服务 |
-| `npm run dev:client` | 启动前端开发服务 |
-| `npm run build` | 构建前后端 |
-| `npm run install:all` | 安装根目录 + 子项目依赖 |
+### 参与者流程
 
-### Server（`server/`）
+#### 首次加入
+1. 访问首页 → 系统检测有房间 → 显示加入表单
+2. 填写 **昵称**、**上传头像** → 点击加入
+3. 系统分配 Ticket → 显示 Ticket 弹窗（请妥善保管）
+4. 进入会议室
 
-| 命令 | 说明 |
-| --- | --- |
-| `npm run dev` | ts-node-dev 热更新启动 |
-| `npm run build` | TypeScript 编译 |
-| `npm run start` | 启动编译产物 |
-
-### Client（`client/`）
-
-| 命令 | 说明 |
-| --- | --- |
-| `npm run dev` | 启动 Vite 开发服务 |
-| `npm run build` | 构建前端 |
-| `npm run preview` | 本地预览构建产物 |
-
-## 🔌 Socket 事件约定
-
-### Client → Server
-
-- `room:create` - 创建房间（需授权口令）
-- `room:join` - 加入房间
-- `room:reconnect` - 断线重连
-- `room:leave` - 离开房间
-- `room:end` - 结束房间（仅主持人）
-- `control:next` - 下一页
-- `control:prev` - 上一页
-
-### Server → Client
-
-- `session:restored` - 会话恢复结果
-- `room:user-joined` - 用户加入
-- `room:user-left` - 用户离开
-- `room:closed` - 房间关闭
-- `state:sync` - 状态同步
-
-## 🌐 REST API
-
-| 端点 | 方法 | 说明 |
-| --- | --- | --- |
-| `/api/room/check` | GET | 验证房间是否存在 |
-| `/api/room/ticket-check` | GET | 验证 Ticket 有效性 |
-| `/health` | GET | 服务健康检查 |
-
-### API 示例
-
-```bash
-# 检查房间是否存在
-curl "http://localhost:3001/api/room/check?roomId=ABC123"
-
-# 验证 Ticket
-curl "http://localhost:3001/api/room/ticket-check?roomId=ABC123&ticket=TKT-XYZ789"
-```
-
-## ❗ 常见错误码
-
-- `BAD_REQUEST` - 参数无效
-- `ROOM_EXISTS` - 房间已存在（单房间模式）
-- `ROOM_NOT_FOUND` - 房间不存在
-- `ROOM_CLOSED` - 房间已关闭
-- `INVALID_PASSWORD` - 授权口令错误
-- `NOT_AUTHENTICATED` - 未认证
-- `NOT_AUTHORIZED` - 无权限
-- `SESSION_EXPIRED` - 会话过期
+#### Ticket 加入
+1. 访问首页 → 系统检测有房间 → 显示加入表单
+2. 输入 **Ticket** → 点击加入
+3. 进入会议室
 
 ## 📁 项目结构
 
-```text
+```
 open-meetup/
 ├── client/                 # React 前端
-│   └── src/
-│       ├── components/     # 页面组件
-│       ├── context/        # MeetingContext 状态管理
-│       ├── pages/          # HostPage, ParticipantPage
-│       └── socket.ts       # Socket.IO 封装
-├── server/                 # Express + Socket.IO 服务端
-│   └── src/
-│       ├── handlers.ts     # Socket 事件处理
-│       ├── roomManager.ts  # 房间状态管理
-│       └── index.ts        # HTTP API
-├── package.json            # workspace 入口脚本
-├── LICENSE
-└── README.md
+│   ├── src/
+│   │   ├── components/     # UI 组件
+│   │   │   ├── ContentViewer.tsx   # 内容查看器
+│   │   │   ├── HostControls.tsx     # 主持人控制按钮
+│   │   │   ├── JoinPage.tsx         # 加入房间页面
+│   │   │   ├── Lobby.tsx            # 房间创建页面
+│   │   │   ├── MeetingStage.tsx     # 演示舞台
+│   │   │   ├── SelfIntroPage.tsx   # 自我介绍页面
+│   │   │   └── ...
+│   │   ├── context/
+│   │   │   └── MeetingContext.tsx  # 会议状态管理
+│   │   ├── pages/
+│   │   │   ├── HostPage.tsx         # 主持人页面
+│   │   │   └── ParticipantPage.tsx  # 参与者页面
+│   │   ├── socket.ts               # Socket.IO 客户端
+│   │   ├── types.ts                # 类型定义
+│   │   └── App.tsx                 # 应用入口
+│   └── package.json
+├── server/                 # Node.js 后端
+│   ├── src/
+│   │   ├── index.ts       # HTTP 服务器入口
+│   │   ├── handlers.ts    # Socket 事件处理
+│   │   └── roomManager.ts # 房间管理逻辑
+│   └── package.json
+└── package.json            # 工作空间根配置
 ```
 
-## 📄 开源许可
+## 🔌 API 接口
 
-本项目采用 [MIT License](./LICENSE)。
+### GET /api/room/current
+
+获取当前房间状态。
+
+**响应**
+
+```json
+// 有房间
+{
+  "exists": true,
+  "title": "Open Meetup",
+  "status": "active",
+  "currentStep": 0,
+  "hostId": "user-xxx"
+}
+
+// 无房间
+{
+  "exists": false
+}
+```
+
+## 🔌 Socket 事件
+
+### 客户端 → 服务端
+
+| 事件 | 参数 | 说明 |
+|------|------|------|
+| `room:create` | `{ userName, title, password }` | 创建房间 |
+| `room:join` | `{ userName, ticket?, avatar? }` | 加入房间 |
+| `room:reconnect` | `{ userId, sessionId }` | 会话恢复 |
+| `room:leave` | `{}` | 离开房间 |
+| `room:end` | `{}` | 结束房间（仅主持人） |
+| `control:next` | `{}` | 下一页 |
+| `control:prev` | `{}` | 上一页 |
+| `control:end` | `{}` | 结束会议（保留房间） |
+| `page:update` | `{ pageIndex, content }` | 更新页面内容（仅主持人） |
+
+### 服务端 → 客户端
+
+| 事件 | 参数 | 说明 |
+|------|------|------|
+| `state:sync` | `RoomStateSync` | 房间状态同步 |
+| `room:user-joined` | `{ user }` | 用户加入 |
+| `room:user-left` | `{ user }` | 用户离开 |
+| `room:user-online` | `{ user }` | 用户上线 |
+| `room:user-offline` | `{ user }` | 用户离线 |
+| `room:closed` | `{ reason }` | 房间关闭 |
+
+## ⚙️ 配置说明
+
+### 服务端端口
+
+默认端口：`3001`
+
+修改方式：编辑 `server/src/index.ts`
+
+```typescript
+const PORT = process.env.PORT || 3001;
+```
+
+### 前端 API 地址
+
+默认：`http://localhost:3001`
+
+修改方式：编辑 `client/.env`
+
+```
+VITE_SERVER_URL=http://localhost:3001
+```
+
+### 授权口令
+
+默认：`12345678`
+
+修改方式：编辑 `server/src/config.ts`
+
+```typescript
+export const HOST_PASSWORD = process.env.HOST_PASSWORD || '12345678';
+```
+
+## 🐛 故障排除
+
+### "无法连接服务器"
+
+- 检查服务器是否启动（端口 3001）
+- 检查前端 `VITE_SERVER_URL` 配置
+
+### "Invalid user name / Invalid ticket"
+
+- 确认昵称不为空
+- Ticket 加入场景请确认 ticket 未输错且房间仍在有效期内
+
+### 页面显示异常
+
+- 尝试强制刷新：Cmd+Shift+R（Mac）或 Ctrl+Shift+R（Windows）
+- 清除浏览器缓存
+
+### 房间状态异常
+
+- 服务器重启会清空房间状态（内存）
+- 主持人离开会自动结束房间

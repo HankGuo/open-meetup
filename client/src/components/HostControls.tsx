@@ -2,13 +2,14 @@ import { useMeeting } from '../context/MeetingContext';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export function HostControls() {
-  const { currentStep, prevStep, nextStep, isConnected } = useMeeting();
+  const { currentStep, prevStep, nextStep, isConnected, pages } = useMeeting();
+  const totalPages = pages.length;
 
   const canGoPrev = currentStep > 0;
-  const canGoNext = currentStep < 4;
+  const canGoNext = currentStep < totalPages - 1;
 
   return (
-    <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-4 bg-white/90 backdrop-blur-sm rounded-full shadow-lg px-6 py-3">
+    <div className="fixed bottom-8 left-1/2 z-40 flex -translate-x-1/2 items-center gap-4 rounded-full bg-white/90 px-6 py-3 shadow-lg backdrop-blur-sm">
       <button
         onClick={() => prevStep()}
         disabled={!canGoPrev || !isConnected}
@@ -21,7 +22,7 @@ export function HostControls() {
       <div className="flex items-center gap-2">
         <span className="text-lg font-bold text-gray-800">{currentStep + 1}</span>
         <span className="text-gray-400">/</span>
-        <span className="text-lg text-gray-500">5</span>
+        <span className="text-lg text-gray-500">{totalPages}</span>
       </div>
 
       <button

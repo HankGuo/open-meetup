@@ -2,6 +2,11 @@ import { randomUUID } from 'crypto';
 import {
   ErrorResponse,
   MeetingStatus,
+  MeetingPageDefinition,
+  MeetingPageKind,
+  MeetingPageTheme,
+  MeetingPhase,
+  PageContent,
   PublicParticipant,
   Room,
   RoomCloseReason,
@@ -11,33 +16,39 @@ import {
   SocketResult,
 } from './types';
 import { HOST_PASSWORD } from './config';
+import { MemoryStore, RoomStore } from './store';
+import { createDefaultMeetingPages, MAX_MEETING_PAGES } from './meetingConfig';
 
-const ROOM_ID_LENGTH = 6;
-const ROOM_ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const MAX_PARTICIPANTS_PER_ROOM = 50;
-const DISCONNECT_GRACE_MS = 120_000; // 2 minutes
+const DISCONNECT_GRACE_MS = 120_000;
+const PARTICIPANT_TICKET_PREFIX = 'TKT-';
+const PARTICIPANT_TICKET_RANDOM_LENGTH = 8;
+const MAX_WORK_URL_LENGTH = 500;
+const MAX_WORK_DESCRIPTION_LENGTH = 120;
+const MAX_PAGE_TITLE_LENGTH = 64;
 
 type AuthContext = { room: Room; participant: RoomParticipant; identity: SocketIdentity };
 
-  type RoomOperationResult = SocketResult<{
-  roomId: string;
+type RoomOperationResult = SocketResult<{
   status: MeetingStatus;
+  phase: MeetingPhase;
   currentStep: number;
   hostId: string;
   participants: PublicParticipant[];
+  pages: MeetingPageDefinition[];
+  pageContents: Array<[string, PageContent]>;
 }>;
+
+type WorkSubmitResult = SocketResult<RoomStateSync>;
 
 type LeaveResult =
   | {
       ok: true;
-      roomId: string;
-      leftUser: PublicParticipant;
       roomClosed: false;
+      leftUser: PublicParticipant;
     }
   | {
       ok: true;
-      roomId: string;
-      leftUser: PublicParticipant;
       roomClosed: true;
       reason: RoomCloseReason;
     }
@@ -47,49 +58,49 @@ type LeaveResult =
     };
 
 interface CleanupResult {
-  closedRooms: Array<{ roomId: string; reason: RoomCloseReason }>;
+  closedRooms: Array<{ reason: RoomCloseReason }>;
+  removedParticipants: PublicParticipant[];
 }
 
 export class RoomManager {
-  private rooms: Map<string, Room> = new Map();
   private socketToIdentity: Map<string, SocketIdentity> = new Map();
+  private readonly store: RoomStore;
 
-  getActiveRoomCount(): number {
-    return this.rooms.size;
+  constructor(store: RoomStore = new MemoryStore()) {
+    this.store = store;
   }
 
-  getRoom(roomId: string): Room | null {
-    return this.rooms.get(roomId) || null;
+  getActiveRoomCount(): number {
+    return this.getActiveRoom() ? 1 : 0;
+  }
+
+  getActiveRoom(): Room | null {
+    return this.store.loadRoom();
   }
 
   createRoom(
     hostUserName: string,
-    roomIdInput: string,
+    title: string,
     password: string,
     socketId: string,
     avatar?: string,
   ): SocketResult<RoomStateSync> {
-    if (this.rooms.size > 0) {
+    const existingRoom = this.getActiveRoom();
+    if (existingRoom) {
       return this.fail('A room already exists. Please end the current room first.', 'ROOM_EXISTS');
     }
 
     const userName = sanitizeUserName(hostUserName);
-    const roomId = roomIdInput?.toUpperCase().trim();
-
+    const roomTitle = sanitizeTitle(title);
     if (!userName) {
       return this.fail('Name is required', 'BAD_REQUEST');
     }
-
-    if (!roomId) {
-      return this.fail('Room ID is required', 'BAD_REQUEST');
+    if (!roomTitle) {
+      return this.fail('Title is required', 'BAD_REQUEST');
     }
 
     if (password !== HOST_PASSWORD) {
       return this.fail('Invalid password', 'INVALID_PASSWORD');
-    }
-
-    if (this.rooms.has(roomId)) {
-      return this.fail('Room already exists', 'ROOM_EXISTS');
     }
 
     this.detachSocket(socketId);
@@ -108,55 +119,92 @@ export class RoomManager {
       ticket: 'HOST-' + randomUUID().substring(0, 8).toUpperCase(),
     };
 
-    const room: Room = {
-      roomId,
+    const activeRoom: Room = {
+      title: roomTitle,
       hostId: host.userId,
       participants: new Map([[host.userId, host]]),
       status: 'active',
+      phase: 'setup',
       currentStep: 0,
       createdAt: now,
       updatedAt: now,
+      pages: createDefaultMeetingPages(),
+      pageContents: new Map(),
     };
 
-    this.rooms.set(roomId, room);
     this.socketToIdentity.set(socketId, {
-      roomId,
       userId: host.userId,
       sessionId: host.sessionId,
     });
 
+    this.store.saveRoom(activeRoom);
+
     return {
       success: true,
-      data: this.toRoomStateSync(room, host),
+      data: this.toRoomStateSync(activeRoom, host),
     };
   }
 
   joinRoom(
-    roomIdInput: string,
     userNameInput: string,
     socketId: string,
     avatar?: string,
     ticket?: string,
   ): SocketResult<RoomStateSync> {
-    const roomId = normalizeRoomId(roomIdInput);
-    const userName = sanitizeUserName(userNameInput);
-
-    if (!roomId || !userName) {
-      return this.fail('Invalid room id or user name', 'BAD_REQUEST');
-    }
-
-    const room = this.rooms.get(roomId);
+    const room = this.getActiveRoom();
     if (!room) {
       return this.fail('Room not found', 'ROOM_NOT_FOUND');
     }
     if (room.status === 'ended') {
       return this.fail('Room is closed', 'ROOM_CLOSED');
     }
+
+    this.detachSocket(socketId);
+
+    const requestedTicket = typeof ticket === 'string' ? normalizeTicket(ticket) : '';
+    if (ticket != null && !requestedTicket) {
+      return this.fail('Invalid ticket', 'INVALID_TICKET');
+    }
+
+    if (requestedTicket) {
+      const participant = this.findParticipantByTicket(room, requestedTicket);
+      if (!participant || participant.role !== 'participant') {
+        return this.fail('Invalid ticket', 'INVALID_TICKET');
+      }
+
+      if (participant.socketId && participant.socketId !== socketId) {
+        this.socketToIdentity.delete(participant.socketId);
+      }
+
+      const now = Date.now();
+      participant.socketId = socketId;
+      participant.online = true;
+      participant.lastSeenAt = now;
+      if (avatar && avatar.trim()) {
+        participant.avatar = avatar;
+      }
+      room.updatedAt = now;
+
+      this.socketToIdentity.set(socketId, {
+        userId: participant.userId,
+        sessionId: participant.sessionId,
+      });
+
+      this.store.saveRoom(room);
+
+      return {
+        success: true,
+        data: this.toRoomStateSync(room, participant),
+      };
+    }
+
+    const userName = sanitizeUserName(userNameInput);
+    if (!userName) {
+      return this.fail('Invalid user name', 'BAD_REQUEST');
+    }
     if (room.participants.size >= MAX_PARTICIPANTS_PER_ROOM) {
       return this.fail('Room is full', 'ROOM_FULL');
     }
-
-    this.detachSocket(socketId);
 
     const now = Date.now();
     const participant: RoomParticipant = {
@@ -169,16 +217,17 @@ export class RoomManager {
       online: true,
       lastSeenAt: now,
       avatar,
-      ticket: ticket || 'TKT-' + randomUUID().substring(0, 8).toUpperCase(),
+      ticket: this.generateParticipantTicket(room),
     };
 
     room.participants.set(participant.userId, participant);
     room.updatedAt = now;
     this.socketToIdentity.set(socketId, {
-      roomId,
       userId: participant.userId,
       sessionId: participant.sessionId,
     });
+
+    this.store.saveRoom(room);
 
     return {
       success: true,
@@ -187,12 +236,11 @@ export class RoomManager {
   }
 
   reconnect(identity: SocketIdentity, socketId: string): SocketResult<RoomStateSync> {
-    const roomId = normalizeRoomId(identity.roomId);
-    if (!roomId || !identity.userId || !identity.sessionId) {
+    if (!identity.userId || !identity.sessionId) {
       return this.fail('Invalid reconnect payload', 'BAD_REQUEST');
     }
 
-    const room = this.rooms.get(roomId);
+    const room = this.getActiveRoom();
     if (!room) {
       return this.fail('Room not found', 'ROOM_NOT_FOUND');
     }
@@ -205,7 +253,6 @@ export class RoomManager {
       return this.fail('Session expired', 'SESSION_EXPIRED');
     }
 
-    // If this user had an old socket mapping, drop it.
     if (participant.socketId && participant.socketId !== socketId) {
       this.socketToIdentity.delete(participant.socketId);
     }
@@ -218,10 +265,11 @@ export class RoomManager {
     room.updatedAt = participant.lastSeenAt;
 
     this.socketToIdentity.set(socketId, {
-      roomId,
       userId: participant.userId,
       sessionId: participant.sessionId,
     });
+
+    this.store.saveRoom(room);
 
     return {
       success: true,
@@ -247,51 +295,29 @@ export class RoomManager {
     }
 
     if (participant.role === 'host') {
-      this.closeRoom(room.roomId);
+      this.closeRoom();
       return {
         ok: true,
-        roomId: room.roomId,
-        leftUser,
         roomClosed: true,
         reason: 'HOST_LEFT',
       };
     }
 
     if (room.participants.size === 0) {
-      this.closeRoom(room.roomId);
+      this.closeRoom();
       return {
         ok: true,
-        roomId: room.roomId,
-        leftUser,
         roomClosed: true,
         reason: 'ROOM_EXPIRED',
       };
     }
 
+    this.store.saveRoom(room);
+
     return {
       ok: true,
-      roomId: room.roomId,
-      leftUser,
       roomClosed: false,
-    };
-  }
-
-  startMeeting(identity: SocketIdentity): RoomOperationResult {
-    const auth = this.authorize(identity);
-    if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
-    }
-    if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
-    }
-
-    auth.room.status = 'active';
-    auth.room.currentStep = 1;
-    auth.room.updatedAt = Date.now();
-
-    return {
-      success: true,
-      data: this.buildPublicRoomSnapshot(auth.room),
+      leftUser,
     };
   }
 
@@ -303,9 +329,16 @@ export class RoomManager {
     if (auth.participant.role !== 'host') {
       return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
     }
+    if (auth.room.phase !== 'live') {
+      return this.fail('请先开始播放后再切换页面', 'BAD_REQUEST');
+    }
 
-    auth.room.currentStep += 1;
-    auth.room.updatedAt = Date.now();
+    const maxStepIndex = Math.max(0, auth.room.pages.length - 1);
+    if (auth.room.currentStep < maxStepIndex) {
+      auth.room.currentStep += 1;
+      auth.room.updatedAt = Date.now();
+      this.store.saveRoom(auth.room);
+    }
 
     return {
       success: true,
@@ -321,11 +354,67 @@ export class RoomManager {
     if (auth.participant.role !== 'host') {
       return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
     }
+    if (auth.room.phase !== 'live') {
+      return this.fail('请先开始播放后再切换页面', 'BAD_REQUEST');
+    }
 
     if (auth.room.currentStep > 0) {
       auth.room.currentStep -= 1;
       auth.room.updatedAt = Date.now();
+      this.store.saveRoom(auth.room);
     }
+
+    return {
+      success: true,
+      data: this.buildPublicRoomSnapshot(auth.room),
+    };
+  }
+
+  startLive(identity: SocketIdentity): RoomOperationResult {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+    }
+    if (auth.room.status !== 'active') {
+      return this.fail('Meeting is not active', 'MEETING_NOT_ACTIVE');
+    }
+    if (auth.room.pages.length === 0) {
+      return this.fail('至少保留一个页面后再开始', 'BAD_REQUEST');
+    }
+
+    auth.room.phase = 'live';
+    auth.room.currentStep = 0;
+    auth.room.updatedAt = Date.now();
+    this.store.saveRoom(auth.room);
+
+    return {
+      success: true,
+      data: this.buildPublicRoomSnapshot(auth.room),
+    };
+  }
+
+  returnToSetup(identity: SocketIdentity): RoomOperationResult {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+    }
+    if (auth.room.status !== 'active') {
+      return this.fail('Meeting is not active', 'MEETING_NOT_ACTIVE');
+    }
+
+    auth.room.phase = 'setup';
+    const maxStepIndex = Math.max(0, auth.room.pages.length - 1);
+    if (auth.room.currentStep > maxStepIndex) {
+      auth.room.currentStep = maxStepIndex;
+    }
+    auth.room.updatedAt = Date.now();
+    this.store.saveRoom(auth.room);
 
     return {
       success: true,
@@ -344,10 +433,114 @@ export class RoomManager {
 
     auth.room.status = 'ended';
     auth.room.updatedAt = Date.now();
+    this.store.saveRoom(auth.room);
 
     return {
       success: true,
       data: this.buildPublicRoomSnapshot(auth.room),
+    };
+  }
+
+  validateHostIdentity(identity: SocketIdentity): SocketResult<null> {
+    if (!identity.userId || !identity.sessionId) {
+      return this.fail('Missing identity', 'BAD_REQUEST');
+    }
+
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+    }
+
+    return {
+      success: true,
+      data: null,
+    };
+  }
+
+  updatePageContent(
+    identity: SocketIdentity,
+    pageId: string,
+    content: PageContent | null,
+  ): SocketResult<RoomStateSync> {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+    }
+    if (auth.room.phase !== 'setup') {
+      return this.fail('播放阶段不允许编辑页面内容', 'BAD_REQUEST');
+    }
+
+    const normalizedPageId = sanitizePageId(pageId);
+    if (!normalizedPageId) {
+      return this.fail('页面 ID 无效', 'BAD_REQUEST');
+    }
+    if (!auth.room.pages.some((page) => page.id === normalizedPageId)) {
+      return this.fail('页面不存在', 'BAD_REQUEST');
+    }
+
+    if (content === null) {
+      auth.room.pageContents.delete(normalizedPageId);
+    } else {
+      auth.room.pageContents.set(normalizedPageId, content);
+    }
+    auth.room.updatedAt = Date.now();
+    this.store.saveRoom(auth.room);
+
+    return {
+      success: true,
+      data: this.toRoomStateSync(auth.room, auth.participant),
+    };
+  }
+
+  updatePages(identity: SocketIdentity, pagesInput: MeetingPageDefinition[]): SocketResult<RoomStateSync> {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+    }
+    if (auth.room.phase !== 'setup') {
+      return this.fail('播放阶段不允许调整页面', 'BAD_REQUEST');
+    }
+
+    const normalizedPages = sanitizePagesInput(pagesInput);
+    if (!normalizedPages) {
+      return this.fail('页面配置不合法', 'BAD_REQUEST');
+    }
+    if (normalizedPages.length === 0) {
+      return this.fail('至少保留一个页面', 'BAD_REQUEST');
+    }
+    if (normalizedPages.length > MAX_MEETING_PAGES) {
+      return this.fail(`页面数量不能超过 ${MAX_MEETING_PAGES} 个`, 'BAD_REQUEST');
+    }
+
+    auth.room.pages = normalizedPages;
+
+    const validIds = new Set(normalizedPages.map((page) => page.id));
+    for (const pageId of Array.from(auth.room.pageContents.keys())) {
+      if (!validIds.has(pageId)) {
+        auth.room.pageContents.delete(pageId);
+      }
+    }
+
+    const maxStepIndex = Math.max(0, normalizedPages.length - 1);
+    if (auth.room.currentStep > maxStepIndex) {
+      auth.room.currentStep = maxStepIndex;
+    }
+
+    auth.room.updatedAt = Date.now();
+    this.store.saveRoom(auth.room);
+
+    return {
+      success: true,
+      data: this.toRoomStateSync(auth.room, auth.participant),
     };
   }
 
@@ -360,15 +553,7 @@ export class RoomManager {
       return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
     }
 
-    const roomId = auth.room.roomId;
-
-    for (const [socketId, id] of this.socketToIdentity.entries()) {
-      if (id.roomId === roomId) {
-        this.socketToIdentity.delete(socketId);
-      }
-    }
-
-    this.rooms.delete(roomId);
+    this.closeRoom();
 
     return {
       success: true,
@@ -376,8 +561,36 @@ export class RoomManager {
     };
   }
 
-  getIdentityBySocket(socketId: string): SocketIdentity | null {
-    return this.socketToIdentity.get(socketId) ?? null;
+  submitWork(identity: SocketIdentity, workUrlInput: string, workDescriptionInput: string): WorkSubmitResult {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'participant') {
+      return this.fail('Only participant can submit work', 'NOT_AUTHORIZED');
+    }
+
+    const workUrl = sanitizeWorkUrl(workUrlInput);
+    if (!workUrl) {
+      return this.fail('请填写有效的 http/https 作品链接', 'BAD_REQUEST');
+    }
+
+    const workDescription = sanitizeWorkDescription(workDescriptionInput);
+    if (!workDescription) {
+      return this.fail('请填写一句话作品描述（最多 120 字）', 'BAD_REQUEST');
+    }
+
+    const now = Date.now();
+    auth.participant.workUrl = workUrl;
+    auth.participant.workDescription = workDescription;
+    auth.participant.workUpdatedAt = now;
+    auth.room.updatedAt = now;
+    this.store.saveRoom(auth.room);
+
+    return {
+      success: true,
+      data: this.toRoomStateSync(auth.room, auth.participant),
+    };
   }
 
   getStateByIdentity(identity: SocketIdentity): SocketResult<RoomStateSync> {
@@ -385,21 +598,19 @@ export class RoomManager {
     if (!auth) {
       return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
     }
+    const room = this.getActiveRoom();
     return {
       success: true,
-      data: this.toRoomStateSync(auth.room, auth.participant),
+      data: this.toRoomStateSync(room!, auth.participant),
     };
   }
 
-  onSocketDisconnected(socketId: string): { roomId: string; user: PublicParticipant } | null {
+  onSocketDisconnected(socketId: string): { user: PublicParticipant } | null {
     const identity = this.socketToIdentity.get(socketId);
-    if (!identity) {
-      return null;
-    }
     this.socketToIdentity.delete(socketId);
 
-    const room = this.rooms.get(identity.roomId);
-    if (!room) {
+    const room = this.getActiveRoom();
+    if (!room || !identity) {
       return null;
     }
     const participant = room.participants.get(identity.userId);
@@ -411,60 +622,65 @@ export class RoomManager {
     participant.online = false;
     participant.lastSeenAt = Date.now();
     room.updatedAt = participant.lastSeenAt;
+    this.store.saveRoom(room);
 
     return {
-      roomId: room.roomId,
       user: this.toPublicParticipant(participant),
     };
   }
 
   cleanupExpired(now = Date.now()): CleanupResult {
-    const closedRooms: Array<{ roomId: string; reason: RoomCloseReason }> = [];
+    const closedRooms: Array<{ reason: RoomCloseReason }> = [];
+    const removedParticipants: PublicParticipant[] = [];
 
-    for (const room of this.rooms.values()) {
-      const offlineUsers: RoomParticipant[] = [];
-      for (const participant of room.participants.values()) {
-        if (!participant.online && now - participant.lastSeenAt > DISCONNECT_GRACE_MS) {
-          offlineUsers.push(participant);
-        }
-      }
+    const room = this.getActiveRoom();
+    if (!room) {
+      return { closedRooms, removedParticipants };
+    }
 
-      for (const participant of offlineUsers) {
-        room.participants.delete(participant.userId);
-      }
-
-      if (offlineUsers.length > 0) {
-        room.updatedAt = now;
-      }
-
-      const hostAlive = room.participants.has(room.hostId);
-      if (!hostAlive) {
-        closedRooms.push({ roomId: room.roomId, reason: 'HOST_TIMEOUT' });
-        this.closeRoom(room.roomId);
-        continue;
-      }
-
-      if (room.participants.size === 0) {
-        closedRooms.push({ roomId: room.roomId, reason: 'ROOM_EXPIRED' });
-        this.closeRoom(room.roomId);
+    const offlineUsers: RoomParticipant[] = [];
+    for (const participant of room.participants.values()) {
+      if (!participant.online && now - participant.lastSeenAt > DISCONNECT_GRACE_MS) {
+        offlineUsers.push(participant);
       }
     }
 
-    return { closedRooms };
+    for (const participant of offlineUsers) {
+      removedParticipants.push(this.toPublicParticipant(participant));
+      room.participants.delete(participant.userId);
+    }
+
+    if (offlineUsers.length > 0) {
+      room.updatedAt = now;
+      this.store.saveRoom(room);
+    }
+
+    const hostAlive = room.participants.has(room.hostId);
+    if (!hostAlive) {
+      closedRooms.push({ reason: 'HOST_TIMEOUT' });
+      this.closeRoom();
+    } else if (room.participants.size === 0) {
+      closedRooms.push({ reason: 'ROOM_EXPIRED' });
+      this.closeRoom();
+    }
+
+    return { closedRooms, removedParticipants };
   }
 
   getDisconnectGraceMs(): number {
     return DISCONNECT_GRACE_MS;
   }
 
-  getPublicRoomSnapshot(roomId: string): SocketResult<{
-    roomId: string;
+  getPublicRoomSnapshot(): SocketResult<{
     status: MeetingStatus;
+    phase: MeetingPhase;
     currentStep: number;
     hostId: string;
     participants: PublicParticipant[];
+    pages: MeetingPageDefinition[];
+    pageContents: Array<[string, PageContent]>;
   }> {
-    const room = this.rooms.get(roomId);
+    const room = this.getActiveRoom();
     if (!room) {
       return this.fail('Room not found', 'ROOM_NOT_FOUND');
     }
@@ -478,7 +694,7 @@ export class RoomManager {
     if (!identity) {
       return null;
     }
-    const room = this.rooms.get(identity.roomId);
+    const room = this.getActiveRoom();
     if (!room) {
       return null;
     }
@@ -492,19 +708,14 @@ export class RoomManager {
     return { room, participant, identity };
   }
 
-  private closeRoom(roomId: string): void {
-    const room = this.rooms.get(roomId);
-    if (!room) {
-      return;
-    }
-
-    for (const participant of room.participants.values()) {
-      if (participant.socketId) {
-        this.socketToIdentity.delete(participant.socketId);
+  private closeRoom(): void {
+    for (const [socketId, id] of this.socketToIdentity.entries()) {
+      const room = this.getActiveRoom();
+      if (room?.participants.has(id.userId)) {
+        this.socketToIdentity.delete(socketId);
       }
     }
-
-    this.rooms.delete(roomId);
+    this.store.clearAll();
   }
 
   private detachSocket(socketId: string): void {
@@ -514,50 +725,99 @@ export class RoomManager {
     }
     this.socketToIdentity.delete(socketId);
 
-    const oldRoom = this.rooms.get(oldIdentity.roomId);
-    const oldParticipant = oldRoom?.participants.get(oldIdentity.userId);
-    if (!oldRoom || !oldParticipant) {
+    const room = this.getActiveRoom();
+    if (!room) {
       return;
     }
-    if (oldParticipant.sessionId !== oldIdentity.sessionId) {
+    const oldParticipant = room.participants.get(oldIdentity.userId);
+    if (!oldParticipant || oldParticipant.sessionId !== oldIdentity.sessionId) {
       return;
     }
     oldParticipant.socketId = null;
     oldParticipant.online = false;
     oldParticipant.lastSeenAt = Date.now();
-    oldRoom.updatedAt = oldParticipant.lastSeenAt;
+    room.updatedAt = oldParticipant.lastSeenAt;
+    this.store.saveRoom(room);
+  }
+
+  private findParticipantByTicket(room: Room, ticket: string): RoomParticipant | null {
+    const normalized = normalizeTicket(ticket);
+    if (!normalized) {
+      return null;
+    }
+
+    for (const participant of room.participants.values()) {
+      if (normalizeTicket(participant.ticket ?? '') === normalized) {
+        return participant;
+      }
+    }
+    return null;
+  }
+
+  private generateParticipantTicket(room: Room): string {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const candidate =
+        PARTICIPANT_TICKET_PREFIX + randomUUID().replace(/-/g, '').slice(0, PARTICIPANT_TICKET_RANDOM_LENGTH).toUpperCase();
+      if (!this.findParticipantByTicket(room, candidate)) {
+        return candidate;
+      }
+    }
+
+    return (
+      PARTICIPANT_TICKET_PREFIX +
+      `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+        .slice(0, PARTICIPANT_TICKET_RANDOM_LENGTH)
+        .toUpperCase()
+    );
   }
 
   private buildPublicRoomSnapshot(room: Room): {
-    roomId: string;
+    title: string;
     status: MeetingStatus;
+    phase: MeetingPhase;
     currentStep: number;
     hostId: string;
     participants: PublicParticipant[];
+    pages: MeetingPageDefinition[];
+    pageContents: Array<[string, PageContent]>;
   } {
     return {
-      roomId: room.roomId,
+      title: room.title,
       status: room.status,
+      phase: room.phase,
       currentStep: room.currentStep,
       hostId: room.hostId,
       participants: this.getPublicParticipants(room),
+      pages: room.pages,
+      pageContents: Array.from(room.pageContents.entries()),
     };
   }
 
   private toRoomStateSync(room: Room, me: RoomParticipant): RoomStateSync {
-    return {
-      roomId: room.roomId,
+    const syncData: RoomStateSync = {
+      title: room.title,
       participants: this.getPublicParticipants(room),
       hostId: room.hostId,
       status: room.status,
+      phase: room.phase,
       currentStep: room.currentStep,
+      pages: room.pages,
       userId: me.userId,
       userRole: me.role,
       userName: me.userName,
       sessionId: me.sessionId,
       avatar: me.avatar,
       ticket: me.ticket,
+      workUrl: me.workUrl,
+      workDescription: me.workDescription,
+      workUpdatedAt: me.workUpdatedAt,
     };
+
+    if (room.pageContents.size > 0) {
+      syncData.pageContents = Array.from(room.pageContents.entries());
+    }
+
+    return syncData;
   }
 
   private getPublicParticipants(room: Room): PublicParticipant[] {
@@ -581,18 +841,10 @@ export class RoomManager {
       lastSeenAt: participant.lastSeenAt,
       avatar: participant.avatar,
       ticket: participant.ticket,
+      workUrl: participant.workUrl,
+      workDescription: participant.workDescription,
+      workUpdatedAt: participant.workUpdatedAt,
     };
-  }
-
-  private generateRoomId(): string {
-    let roomId = '';
-    do {
-      roomId = Array.from({ length: ROOM_ID_LENGTH }, () => {
-        const index = Math.floor(Math.random() * ROOM_ID_CHARS.length);
-        return ROOM_ID_CHARS[index];
-      }).join('');
-    } while (this.rooms.has(roomId));
-    return roomId;
   }
 
   private fail<T>(message: string, code: ErrorResponse['code']): SocketResult<T> {
@@ -605,6 +857,7 @@ export class RoomManager {
   private error(message: string, code: ErrorResponse['code']): ErrorResponse {
     return { message, code };
   }
+
 }
 
 function sanitizeUserName(userName: string): string {
@@ -614,13 +867,113 @@ function sanitizeUserName(userName: string): string {
   return userName.trim().slice(0, 32);
 }
 
-function normalizeRoomId(roomId: string): string {
-  if (typeof roomId !== 'string') {
+function sanitizeTitle(title: string): string {
+  if (typeof title !== 'string') {
     return '';
   }
-  const normalized = roomId.trim().toUpperCase();
-  if (!/^[A-Z0-9]{6}$/.test(normalized)) {
+  return title.trim().slice(0, 64);
+}
+
+function sanitizePageId(value: unknown): string {
+  if (typeof value !== 'string') {
     return '';
   }
-  return normalized;
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  return trimmed.slice(0, 120);
+}
+
+function sanitizePageKind(value: unknown): MeetingPageKind | null {
+  if (value === 'canvas' || value === 'selfIntro' || value === 'showcase') {
+    return value;
+  }
+  return null;
+}
+
+function sanitizePageTheme(value: unknown): MeetingPageTheme | null {
+  if (value === 1 || value === 2 || value === 3) {
+    return value;
+  }
+  return null;
+}
+
+function sanitizePageTitle(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().slice(0, MAX_PAGE_TITLE_LENGTH);
+}
+
+function sanitizePagesInput(value: unknown): MeetingPageDefinition[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const seenIds = new Set<string>();
+  const pages: MeetingPageDefinition[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+
+    const rawPage = raw as Record<string, unknown>;
+    const id = sanitizePageId(rawPage.id);
+    const kind = sanitizePageKind(rawPage.kind);
+    const theme = sanitizePageTheme(rawPage.theme);
+    const title = sanitizePageTitle(rawPage.title);
+
+    if (!id || !kind || !theme || !title || seenIds.has(id)) {
+      return null;
+    }
+
+    seenIds.add(id);
+    pages.push({
+      id,
+      kind,
+      theme,
+      title,
+    });
+  }
+
+  return pages;
+}
+
+function normalizeTicket(ticket: string): string {
+  if (typeof ticket !== 'string') {
+    return '';
+  }
+  return ticket.trim().toUpperCase();
+}
+
+function sanitizeWorkUrl(input: string): string {
+  if (typeof input !== 'string') {
+    return '';
+  }
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.length > MAX_WORK_URL_LENGTH) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return '';
+    }
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function sanitizeWorkDescription(input: string): string {
+  if (typeof input !== 'string') {
+    return '';
+  }
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.length > MAX_WORK_DESCRIPTION_LENGTH) {
+    return '';
+  }
+  return trimmed;
 }

@@ -1,8 +1,17 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { emitWithAck, initSocket } from '../socket';
-import { MeetingContextType, MeetingStatus, SessionCredentials, User, UserRole } from '../types';
-
-const SESSION_STORAGE_KEY = 'open-meetup:session:v2';
+import {
+  MeetingContextType,
+  MeetingPageDefinition,
+  MeetingPhase,
+  MeetingStatus,
+  PageContent,
+  SessionCredentials,
+  User,
+  UserRole,
+} from '../types';
+import { STORAGE_KEYS, clearStoredSession, loadStoredSession, saveStoredSession } from './storage';
+import { createDefaultMeetingPages } from '../meetingConfig';
 
 const MeetingContext = createContext<MeetingContextType | null>(null);
 
@@ -18,17 +27,23 @@ interface SocketError {
 type SocketResponse<T> = { success: true; data: T } | { success: false; error: SocketError };
 
 interface RoomSyncData {
-  roomId: string;
+  title: string;
   participants: User[];
   hostId: string;
   status: MeetingStatus;
+  phase: MeetingPhase;
   currentStep: number;
+  pages: MeetingPageDefinition[];
   userId: string;
   userRole: UserRole;
   userName: string;
   sessionId: string;
   avatar?: string;
   ticket?: string;
+  workUrl?: string;
+  workDescription?: string;
+  workUpdatedAt?: number;
+  pageContents?: Array<[string, { type: 'canvas' | 'image' | 'url' | 'html' | 'markdown'; content: string }]>;
 }
 
 interface LeaveRoomData {
@@ -37,11 +52,13 @@ interface LeaveRoomData {
 }
 
 interface StateSyncEvent {
-  roomId: string;
   participants: User[];
   status: MeetingStatus;
+  phase: MeetingPhase;
   currentStep: number;
   hostId: string;
+  pages: MeetingPageDefinition[];
+  pageContents?: Array<[string, { type: 'canvas' | 'image' | 'url' | 'html' | 'markdown'; content: string }]>;
 }
 
 export function MeetingProvider({ children }: MeetingProviderProps) {
@@ -56,27 +73,32 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   const [myName, setMyName] = useState('');
   const [myTicket, setMyTicket] = useState('');
   const [sessionId, setSessionId] = useState(storedSessionRef.current?.sessionId ?? '');
-  const [roomId, setRoomId] = useState('');
+  const [title, setTitle] = useState('');
   const [participants, setParticipants] = useState<User[]>([]);
   const [hostId, setHostId] = useState('');
   const [status, setStatus] = useState<MeetingStatus>('active');
+  const [phase, setPhase] = useState<MeetingPhase>('setup');
   const [currentStep, setCurrentStep] = useState(0);
+  const [pages, setPages] = useState<MeetingPageDefinition[]>(createDefaultMeetingPages);
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [isReconnecting, setIsReconnecting] = useState(Boolean(storedSessionRef.current));
   const [error, setError] = useState<string | null>(null);
+  const [pageContents, setPageContents] = useState<Map<string, PageContent>>(new Map());
 
   const clearError = useCallback(() => {
     setError(null);
   }, []);
 
   const resetRoomState = useCallback(() => {
-    setRoomId('');
     setParticipants([]);
     setHostId('');
     setStatus('ended');
+    setPhase('setup');
     setCurrentStep(0);
+    setPages(createDefaultMeetingPages());
     setMyRole('participant');
     setMyName('');
+    setPageContents(new Map());
   }, []);
 
   const clearSession = useCallback(() => {
@@ -84,8 +106,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     clearStoredSession();
     setMyUserId('');
     setSessionId('');
-    localStorage.removeItem('open-meetup:isHost');
-    localStorage.removeItem('open-meetup:hostRoomId');
+    localStorage.removeItem(STORAGE_KEYS.isHost);
   }, []);
 
   const persistSession = useCallback((credentials: SessionCredentials) => {
@@ -97,18 +118,21 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
   const applySyncData = useCallback(
     (data: RoomSyncData) => {
-      setRoomId(data.roomId);
+      setTitle(data.title);
       setParticipants(data.participants);
       setHostId(data.hostId);
       setStatus(data.status);
+      setPhase(data.phase);
       setCurrentStep(data.currentStep);
+      setPages(data.pages);
       setMyUserId(data.userId);
       setMyRole(data.userRole);
       setMyName(data.userName);
       setSessionId(data.sessionId);
       setMyTicket(data.ticket || '');
+      // keep my own work fields aligned with server response in participants list
+      setPageContents(new Map(data.pageContents ?? []));
       persistSession({
-        roomId: data.roomId,
         userId: data.userId,
         sessionId: data.sessionId,
       });
@@ -182,13 +206,13 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   }, [applySyncData, handleReconnectFailure, safeEmit]);
 
   const createRoom = useCallback(
-    async (userName: string, roomId: string, password: string): Promise<boolean> => {
+    async (userName: string, title: string, password: string): Promise<boolean> => {
       if (!isConnected) {
         setError('未连接到服务器，请稍后再试');
         return false;
       }
 
-      const response = (await safeEmit('room:create', { userName, roomId, password })) as SocketResponse<RoomSyncData> | null;
+      const response = (await safeEmit('room:create', { userName, title, password })) as SocketResponse<RoomSyncData> | null;
       if (!response) {
         return false;
       }
@@ -198,22 +222,20 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       }
 
       applySyncData(response.data);
-      localStorage.setItem('open-meetup:isHost', 'true');
-      localStorage.setItem('open-meetup:hostRoomId', response.data.roomId);
+      localStorage.setItem(STORAGE_KEYS.isHost, 'true');
       return true;
     },
     [applySyncData, handleSocketFailure, isConnected, safeEmit],
   );
 
   const joinRoom = useCallback(
-    async (roomIdToJoin: string, userName: string, ticket?: string, avatar?: string): Promise<boolean> => {
+    async (userName: string, ticket?: string, avatar?: string): Promise<boolean> => {
       if (!isConnected) {
         setError('未连接到服务器，请稍后再试');
         return false;
       }
 
       const response = (await safeEmit('room:join', {
-        roomId: roomIdToJoin,
         userName,
         ticket,
         avatar,
@@ -228,7 +250,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
       applySyncData(response.data);
       if (response.data.ticket) {
-        localStorage.setItem('open-meetup:ticket', response.data.ticket);
+        localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
       }
       return true;
     },
@@ -309,6 +331,30 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     return true;
   }, [handleSocketFailure, safeEmit]);
 
+  const startLive = useCallback(async (): Promise<boolean> => {
+    const response = (await safeEmit('control:start-live', {})) as SocketResponse<null> | null;
+    if (!response) {
+      return false;
+    }
+    if (!response.success) {
+      handleSocketFailure(response.error, '开始播放失败');
+      return false;
+    }
+    return true;
+  }, [handleSocketFailure, safeEmit]);
+
+  const returnToSetup = useCallback(async (): Promise<boolean> => {
+    const response = (await safeEmit('control:return-setup', {})) as SocketResponse<null> | null;
+    if (!response) {
+      return false;
+    }
+    if (!response.success) {
+      handleSocketFailure(response.error, '返回编辑页失败');
+      return false;
+    }
+    return true;
+  }, [handleSocketFailure, safeEmit]);
+
   const prevStep = useCallback(async (): Promise<boolean> => {
     const response = (await safeEmit('control:prev', {})) as SocketResponse<null> | null;
     if (!response) {
@@ -332,6 +378,51 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     }
     return true;
   }, [handleSocketFailure, safeEmit]);
+
+  const updatePageContent = useCallback(
+    async (pageId: string, content: PageContent | null): Promise<boolean> => {
+      const response = (await safeEmit('page:update', { pageId, content })) as SocketResponse<RoomSyncData> | null;
+      if (!response) {
+        return false;
+      }
+      if (!response.success) {
+        handleSocketFailure(response.error, '更新页面内容失败');
+        return false;
+      }
+      return true;
+    },
+    [handleSocketFailure, safeEmit],
+  );
+
+  const updatePages = useCallback(
+    async (nextPages: MeetingPageDefinition[]): Promise<boolean> => {
+      const response = (await safeEmit('pages:update', { pages: nextPages })) as SocketResponse<RoomSyncData> | null;
+      if (!response) {
+        return false;
+      }
+      if (!response.success) {
+        handleSocketFailure(response.error, '更新页面顺序失败');
+        return false;
+      }
+      return true;
+    },
+    [handleSocketFailure, safeEmit],
+  );
+
+  const submitMyWork = useCallback(
+    async (url: string, description: string): Promise<boolean> => {
+      const response = (await safeEmit('work:submit', { url, description })) as SocketResponse<RoomSyncData> | null;
+      if (!response) {
+        return false;
+      }
+      if (!response.success) {
+        handleSocketFailure(response.error, '提交作品失败');
+        return false;
+      }
+      return true;
+    },
+    [handleSocketFailure, safeEmit],
+  );
 
   useEffect(() => {
     const onConnect = () => {
@@ -376,16 +467,13 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     };
 
     const onStateSync = (data: StateSyncEvent) => {
-      setRoomId(data.roomId);
       setParticipants(data.participants);
       setHostId(data.hostId);
       setStatus(data.status);
+      setPhase(data.phase);
       setCurrentStep(data.currentStep);
-    };
-
-    const onMeetingStarted = (data: { status: MeetingStatus; currentStep: number }) => {
-      setStatus(data.status);
-      setCurrentStep(data.currentStep);
+      setPages(data.pages);
+      setPageContents(new Map(data.pageContents ?? []));
     };
 
     const onMeetingNext = (data: { currentStep: number }) => {
@@ -409,7 +497,6 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     socket.on('room:user-online', onUserOnline);
     socket.on('room:user-offline', onUserOffline);
     socket.on('state:sync', onStateSync);
-    socket.on('control:started', onMeetingStarted);
     socket.on('control:next', onMeetingNext);
     socket.on('control:ended', onMeetingEnded);
     socket.on('room:closed', onRoomClosed);
@@ -422,7 +509,6 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       socket.off('room:user-online', onUserOnline);
       socket.off('room:user-offline', onUserOffline);
       socket.off('state:sync', onStateSync);
-      socket.off('control:started', onMeetingStarted);
       socket.off('control:next', onMeetingNext);
       socket.off('control:ended', onMeetingEnded);
       socket.off('room:closed', onRoomClosed);
@@ -430,19 +516,22 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   }, [clearSession, reconnectWithSession, resetRoomState, socket]);
 
   useEffect(() => {
-    if (socket.connected && sessionRef.current) {
+    if (isConnected && sessionRef.current) {
       void reconnectWithSession();
     } else if (!sessionRef.current) {
       setIsReconnecting(false);
     }
-  }, [reconnectWithSession, socket.connected]);
+  }, [isConnected, reconnectWithSession]);
 
   const value: MeetingContextType = {
-    roomId,
+    title,
     participants,
     hostId,
     status,
+    phase,
     currentStep,
+    pages,
+    pageContents,
     myUserId,
     myRole,
     myName,
@@ -455,9 +544,14 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     joinRoom,
     leaveRoom,
     endRoom,
+    startLive,
+    returnToSetup,
     prevStep,
     nextStep,
     endMeeting,
+    updatePageContent,
+    updatePages,
+    submitMyWork,
     clearError,
   };
 
@@ -472,46 +566,10 @@ export function useMeeting(): MeetingContextType {
   return context;
 }
 
-function saveStoredSession(session: SessionCredentials) {
-  try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    // ignore storage failure
-  }
-}
-
-function clearStoredSession() {
-  try {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // ignore storage failure
-  }
-}
-
-function loadStoredSession(): SessionCredentials | null {
-  try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<SessionCredentials>;
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-    if (!parsed.roomId || !parsed.userId || !parsed.sessionId) {
-      return null;
-    }
-    return {
-      roomId: parsed.roomId,
-      userId: parsed.userId,
-      sessionId: parsed.sessionId,
-    };
-  } catch {
-    return null;
-  }
-}
-
 function mapRoomClosedReason(reason: string): string {
+  if (reason === 'HOST_ENDED') {
+    return '主持人已结束会议';
+  }
   if (reason === 'HOST_LEFT') {
     return '主持人已离开，会议已关闭';
   }

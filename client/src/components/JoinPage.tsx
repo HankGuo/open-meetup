@@ -1,12 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useMeeting } from '../context/MeetingContext';
 import { Wifi, WifiOff, Upload, Ticket, User } from 'lucide-react';
+import { STORAGE_KEYS } from '../context/storage';
 
-interface JoinPageProps {
-  roomId: string;
-}
-
-export function JoinPage({ roomId }: JoinPageProps) {
+export function JoinPage() {
   const { joinRoom, isConnected, isReconnecting, error, clearError } = useMeeting();
   const [mode, setMode] = useState<'ticket' | 'form'>('form');
   const [userName, setUserName] = useState('');
@@ -18,22 +15,22 @@ export function JoinPage({ roomId }: JoinPageProps) {
   const [ticketError, setTicketError] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedAvatar = localStorage.getItem('open-meetup:avatar');
+    const storedAvatar = localStorage.getItem(STORAGE_KEYS.avatar);
     if (storedAvatar) {
       setAvatar(storedAvatar);
       setPreviewUrl(storedAvatar);
     }
-    const storedTicket = localStorage.getItem('open-meetup:ticket');
+    const storedTicket = localStorage.getItem(STORAGE_KEYS.ticket);
     if (storedTicket) {
       setTicket(storedTicket);
       setMode('ticket');
     }
   }, []);
 
-  async function verifyTicket(ticketToVerify: string): Promise<{ valid: boolean; userName?: string; error?: string }> {
+  async function verifyTicket(ticketToVerify: string): Promise<{ valid: boolean; error?: string }> {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/ticket-check?roomId=${encodeURIComponent(roomId)}&ticket=${encodeURIComponent(ticketToVerify)}`
+        `${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/ticket-check?ticket=${encodeURIComponent(ticketToVerify)}`
       );
       const data = await response.json();
       return data;
@@ -50,7 +47,7 @@ export function JoinPage({ roomId }: JoinPageProps) {
         const dataUrl = event.target?.result as string;
         setAvatar(dataUrl);
         setPreviewUrl(dataUrl);
-        localStorage.setItem('open-meetup:avatar', dataUrl);
+        localStorage.setItem(STORAGE_KEYS.avatar, dataUrl);
       };
       reader.readAsDataURL(file);
     }
@@ -73,7 +70,7 @@ export function JoinPage({ roomId }: JoinPageProps) {
         return;
       }
       setLoading(true);
-      const success = await joinRoom(roomId, verifyResult.userName || 'Anonymous', ticket.trim(), undefined);
+      const success = await joinRoom('', ticket.trim(), undefined);
       setLoading(false);
       if (!success) {
         // Error is already set in context
@@ -88,7 +85,7 @@ export function JoinPage({ roomId }: JoinPageProps) {
         return;
       }
       setLoading(true);
-      const success = await joinRoom(roomId, userName.trim(), undefined, avatar);
+      const success = await joinRoom(userName.trim(), undefined, avatar);
       setLoading(false);
       if (!success) {
         // Error is already set in context
@@ -97,7 +94,7 @@ export function JoinPage({ roomId }: JoinPageProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 flex items-center justify-center p-4">
+    <div className="h-full w-full overflow-hidden bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-900">加入会议</h1>
@@ -117,11 +114,6 @@ export function JoinPage({ roomId }: JoinPageProps) {
             {error}
           </div>
         )}
-
-        <div className="mb-6 text-center">
-          <p className="text-gray-500 text-sm mb-2">房间ID</p>
-          <p className="text-3xl font-bold text-indigo-600 tracking-wider">{roomId}</p>
-        </div>
 
         <div className="flex mb-6 border rounded-lg overflow-hidden">
           <button

@@ -1,7 +1,8 @@
 export type UserRole = 'host' | 'participant';
 export type MeetingStatus = 'active' | 'ended';
+export type MeetingPhase = 'setup' | 'live';
 
-export type RoomCloseReason = 'HOST_LEFT' | 'HOST_TIMEOUT' | 'ROOM_EXPIRED';
+export type RoomCloseReason = 'HOST_LEFT' | 'HOST_ENDED' | 'HOST_TIMEOUT' | 'ROOM_EXPIRED';
 
 export interface RoomParticipant {
   userId: string;
@@ -14,6 +15,9 @@ export interface RoomParticipant {
   lastSeenAt: number;
   avatar?: string;
   ticket?: string;
+  workUrl?: string;
+  workDescription?: string;
+  workUpdatedAt?: number;
 }
 
 export interface PublicParticipant {
@@ -25,34 +29,60 @@ export interface PublicParticipant {
   lastSeenAt: number;
   avatar?: string;
   ticket?: string;
+  workUrl?: string;
+  workDescription?: string;
+  workUpdatedAt?: number;
+}
+
+export interface PageContent {
+  type: 'canvas' | 'image' | 'url' | 'html' | 'markdown';
+  content: string;
+}
+
+export type MeetingPageTheme = 1 | 2 | 3;
+export type MeetingPageKind = 'canvas' | 'selfIntro' | 'showcase';
+
+export interface MeetingPageDefinition {
+  id: string;
+  theme: MeetingPageTheme;
+  kind: MeetingPageKind;
+  title: string;
 }
 
 export interface Room {
-  roomId: string;
+  title: string;
   hostId: string;
   participants: Map<string, RoomParticipant>;
   status: MeetingStatus;
+  phase: MeetingPhase;
   currentStep: number;
   createdAt: number;
   updatedAt: number;
+  pages: MeetingPageDefinition[];
+  pageContents: Map<string, PageContent>;
 }
 
 export interface RoomStateSync {
-  roomId: string;
+  title: string;
   participants: PublicParticipant[];
   hostId: string;
   status: MeetingStatus;
+  phase: MeetingPhase;
   currentStep: number;
+  pages: MeetingPageDefinition[];
   userId: string;
   userRole: UserRole;
   userName: string;
   sessionId: string;
   avatar?: string;
   ticket?: string;
+  workUrl?: string;
+  workDescription?: string;
+  workUpdatedAt?: number;
+  pageContents?: Array<[string, PageContent]>;
 }
 
 export interface SocketIdentity {
-  roomId: string;
   userId: string;
   sessionId: string;
 }
@@ -61,6 +91,7 @@ export interface ErrorResponse {
   message: string;
   code:
     | 'BAD_REQUEST'
+    | 'INVALID_TICKET'
     | 'INVALID_PASSWORD'
     | 'ROOM_EXISTS'
     | 'ROOM_NOT_FOUND'

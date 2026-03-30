@@ -3,9 +3,9 @@ import { useMeeting } from '../context/MeetingContext';
 import { Wifi, WifiOff } from 'lucide-react';
 
 export function Lobby() {
-  const { createRoom, isConnected, isReconnecting, error, clearError } = useMeeting();
+  const { createRoom, isConnected, error, clearError } = useMeeting();
   const [userName, setUserName] = useState('');
-  const [roomId, setRoomId] = useState('');
+  const [title, setTitle] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -14,8 +14,8 @@ export function Lobby() {
       alert('请输入您的姓名');
       return;
     }
-    if (!roomId.trim()) {
-      alert('请输入房间ID');
+    if (!title.trim()) {
+      alert('请输入房间标题');
       return;
     }
     if (!password.trim()) {
@@ -24,7 +24,7 @@ export function Lobby() {
     }
     clearError();
     setLoading(true);
-    const success = await createRoom(userName.trim(), roomId.trim().toUpperCase(), password.trim());
+    const success = await createRoom(userName.trim(), title.trim(), password.trim());
     setLoading(false);
     if (!success) {
       setPassword('');
@@ -32,7 +32,7 @@ export function Lobby() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="h-full w-full overflow-hidden bg-gray-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Open Meetup</h1>
@@ -69,14 +69,14 @@ export function Lobby() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              房间ID
+              房间标题
             </label>
             <input
               type="text"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="请输入房间ID"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+              placeholder="请输入房间标题"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
             />
           </div>
 
@@ -96,7 +96,7 @@ export function Lobby() {
           <button
             className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-md transition-colors"
             onClick={handleCreateRoom}
-            disabled={loading || !isConnected || isReconnecting}
+            disabled={loading || !isConnected}
           >
             {loading ? '创建中...' : '创建新会议'}
           </button>

@@ -1,38 +1,39 @@
 import { useMeeting } from '../context/MeetingContext';
-import { WelcomePage } from './WelcomePage';
-import { HackathonDetailPage } from './HackathonDetailPage';
-import { NewsPage } from './NewsPage';
-import { DoubaoPage } from './DoubaoPage';
+import { ContentViewer } from './ContentViewer';
+import { ParticipantRosterBar } from './ParticipantRosterBar';
 import { SelfIntroPage } from './SelfIntroPage';
+import { ShowcasePage } from './ShowcasePage';
 
 export function MeetingStage() {
-  const { currentStep, participants, hostId } = useMeeting();
-
-  const host = participants.find((p) => p.userId === hostId) || null;
-
-  if (currentStep === 0) {
-    return <WelcomePage host={host} />;
-  }
-
-  if (currentStep === 1) {
-    return <HackathonDetailPage />;
-  }
-
-  if (currentStep === 2) {
-    return <NewsPage />;
-  }
-
-  if (currentStep === 3) {
-    return <DoubaoPage />;
-  }
-
-  if (currentStep === 4) {
-    return <SelfIntroPage />;
-  }
-
+  const { currentStep, pages } = useMeeting();
+  const currentPage = pages[currentStep];
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <p className="text-gray-500">内容加载中...</p>
+    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+      <ParticipantRosterBar pageTitle={currentPage?.title} />
+
+      {!currentPage && (
+        <div className="flex-1 flex items-center justify-center bg-gray-50">
+          <p className="text-gray-400">内容加载中...</p>
+        </div>
+      )}
+
+      {currentPage?.kind === 'selfIntro' && (
+        <div className="flex-1 min-h-0">
+          <SelfIntroPage />
+        </div>
+      )}
+
+      {currentPage?.kind === 'showcase' && (
+        <div className="flex-1 min-h-0">
+          <ShowcasePage />
+        </div>
+      )}
+
+      {currentPage?.kind === 'canvas' && (
+        <div className="flex-1 min-h-0">
+          <ContentViewer pageId={currentPage.id} pageIndex={currentStep} />
+        </div>
+      )}
     </div>
   );
 }

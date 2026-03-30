@@ -1,43 +1,50 @@
 import { Server, Socket } from 'socket.io';
 import { RoomManager } from './roomManager';
-import { ErrorResponse, RoomCloseReason, SocketIdentity, SocketResult } from './types';
+import { ErrorResponse, MeetingPageDefinition, PageContent, RoomCloseReason, SocketIdentity, SocketResult } from './types';
+import { deleteManagedUploadByRelativePath, getManagedRelativePathFromContent } from './uploadStorage';
 
 type AckFn<T = unknown> = (response: T) => void;
 
-interface SocketData {
-  identity?: SocketIdentity;
-  authCandidate?: SocketIdentity;
-}
-
 interface CreateRoomPayload {
   userName: string;
-  roomId: string;
+  title: string;
   password: string;
   avatar?: string;
 }
 
 interface JoinRoomPayload {
-  roomId: string;
   userName: string;
   avatar?: string;
   ticket?: string;
 }
 
 interface ReconnectPayload {
-  roomId: string;
   userId: string;
   sessionId: string;
+}
+
+interface WorkSubmitPayload {
+  url: string;
+  description: string;
+}
+
+interface PageUpdatePayload {
+  pageId: string;
+  content: { type: string; content: string } | null;
+}
+
+interface PagesUpdatePayload {
+  pages: MeetingPageDefinition[];
 }
 
 export function registerHandlers(io: Server, roomManager: RoomManager) {
   io.use((socket, next) => {
     const auth = socket.handshake.auth as Partial<ReconnectPayload> | undefined;
     if (auth && typeof auth === 'object') {
-      const roomId = typeof auth.roomId === 'string' ? auth.roomId : '';
       const userId = typeof auth.userId === 'string' ? auth.userId : '';
       const sessionId = typeof auth.sessionId === 'string' ? auth.sessionId : '';
-      if (roomId && userId && sessionId) {
-        getData(socket).authCandidate = { roomId, userId, sessionId };
+      if (userId && sessionId) {
+        getData(socket).authCandidate = { userId, sessionId };
       }
     }
     next();
@@ -46,49 +53,24 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
   io.on('connection', (socket) => {
     console.log(`[Socket] Client connected: ${socket.id}`);
 
-    // Auto resume from handshake auth if provided.
     const authCandidate = getData(socket).authCandidate;
     if (authCandidate) {
       const reconnectResult = roomManager.reconnect(authCandidate, socket.id);
       if (reconnectResult.success) {
         const syncData = reconnectResult.data;
         setSocketIdentity(socket, {
-          roomId: syncData.roomId,
           userId: syncData.userId,
           sessionId: syncData.sessionId,
         });
-        socket.join(syncData.roomId);
-        socket.emit('session:restored', { success: true, data: syncData });
-        broadcastRoomState(io, roomManager, syncData.roomId);
-      } else {
-        socket.emit('session:restored', { success: false, error: reconnectResult.error });
+        broadcastRoomState(io, roomManager);
       }
     }
-
-    socket.on('room:check', (payload: { roomId: string }, callback?: AckFn<SocketResult<{ exists: boolean; status?: string }>>) => {
-      try {
-        const roomId = payload?.roomId?.trim().toUpperCase();
-        if (!roomId) {
-          ack(callback, { success: false, error: { message: 'Invalid room id', code: 'BAD_REQUEST' } });
-          return;
-        }
-        const room = roomManager.getRoom(roomId);
-        if (room) {
-          ack(callback, { success: true, data: { exists: true, status: room.status } });
-        } else {
-          ack(callback, { success: true, data: { exists: false } });
-        }
-      } catch (error) {
-        console.error('[Socket] room:check error:', error);
-        ack(callback, { success: false, error: { message: 'Failed to check room', code: 'INTERNAL_ERROR' } });
-      }
-    });
 
     socket.on('room:create', (payload: CreateRoomPayload, callback?: AckFn<SocketResult<unknown>>) => {
       try {
         const result = roomManager.createRoom(
           payload?.userName ?? '',
-          payload?.roomId ?? '',
+          payload?.title ?? '',
           payload?.password ?? '',
           socket.id,
           payload?.avatar,
@@ -99,11 +81,9 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         }
 
         setSocketIdentity(socket, {
-          roomId: result.data.roomId,
           userId: result.data.userId,
           sessionId: result.data.sessionId,
         });
-        socket.join(result.data.roomId);
 
         ack(callback, result);
       } catch (error) {
@@ -115,7 +95,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
     socket.on('room:join', (payload: JoinRoomPayload, callback?: AckFn<SocketResult<unknown>>) => {
       try {
         const result = roomManager.joinRoom(
-          payload?.roomId ?? '',
           payload?.userName ?? '',
           socket.id,
           payload?.avatar,
@@ -127,17 +106,15 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         }
 
         setSocketIdentity(socket, {
-          roomId: result.data.roomId,
           userId: result.data.userId,
           sessionId: result.data.sessionId,
         });
-        socket.join(result.data.roomId);
 
         const me = result.data.participants.find((participant) => participant.userId === result.data.userId);
         if (me) {
-          socket.to(result.data.roomId).emit('room:user-joined', { user: me });
+          socket.broadcast.emit('room:user-joined', { user: me });
         }
-        broadcastRoomState(io, roomManager, result.data.roomId);
+        broadcastRoomState(io, roomManager);
 
         ack(callback, result);
       } catch (error) {
@@ -149,7 +126,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
     socket.on('room:reconnect', (payload: ReconnectPayload, callback?: AckFn<SocketResult<unknown>>) => {
       try {
         const identity: SocketIdentity = {
-          roomId: payload?.roomId ?? '',
           userId: payload?.userId ?? '',
           sessionId: payload?.sessionId ?? '',
         };
@@ -161,17 +137,15 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         }
 
         setSocketIdentity(socket, {
-          roomId: result.data.roomId,
           userId: result.data.userId,
           sessionId: result.data.sessionId,
         });
-        socket.join(result.data.roomId);
 
         const me = result.data.participants.find((participant) => participant.userId === result.data.userId);
         if (me) {
-          socket.to(result.data.roomId).emit('room:user-online', { user: me });
+          socket.broadcast.emit('room:user-online', { user: me });
         }
-        broadcastRoomState(io, roomManager, result.data.roomId);
+        broadcastRoomState(io, roomManager);
 
         ack(callback, result);
       } catch (error) {
@@ -195,14 +169,12 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         }
 
         clearSocketIdentity(socket);
-        socket.leave(result.roomId);
 
         if (result.roomClosed) {
-          io.to(result.roomId).emit('room:closed', { reason: result.reason });
-          io.in(result.roomId).socketsLeave(result.roomId);
+          io.emit('room:closed', { reason: result.reason });
         } else {
-          socket.to(result.roomId).emit('room:user-left', { user: result.leftUser });
-          broadcastRoomState(io, roomManager, result.roomId);
+          socket.broadcast.emit('room:user-left', { user: result.leftUser });
+          broadcastRoomState(io, roomManager);
         }
 
         ack(callback, {
@@ -219,7 +191,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       try {
         const identity = getSocketIdentity(socket);
         if (!identity) {
-          ack(callback, failure('Not in a room', 'NOT_AUTHENTICATED'));
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
           return;
         }
 
@@ -230,36 +202,13 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         }
 
         clearSocketIdentity(socket);
-        socket.leave(identity.roomId);
-        io.to(identity.roomId).emit('room:closed', { reason: 'host_ended' });
-        io.in(identity.roomId).socketsLeave(identity.roomId);
+        io.emit('room:closed', { reason: 'HOST_ENDED' });
 
         ack(callback, result);
       } catch (error) {
         console.error('[Socket] room:end error:', error);
         ack(callback, failure('Failed to end room', 'INTERNAL_ERROR'));
       }
-    });
-
-    socket.on('control:start', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
-
-      const result = roomManager.startMeeting(identity);
-      if (!result.success) {
-        ack(callback, result);
-        return;
-      }
-
-      io.to(result.data.roomId).emit('control:started', {
-        status: result.data.status,
-        currentStep: result.data.currentStep,
-      });
-      broadcastRoomState(io, roomManager, result.data.roomId);
-      ack(callback, { success: true, data: null });
     });
 
     socket.on('control:next', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
@@ -275,10 +224,10 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.to(result.data.roomId).emit('control:next', {
+      io.emit('control:next', {
         currentStep: result.data.currentStep,
       });
-      broadcastRoomState(io, roomManager, result.data.roomId);
+      broadcastRoomState(io, roomManager);
       ack(callback, { success: true, data: null });
     });
 
@@ -295,10 +244,52 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.to(result.data.roomId).emit('control:prev', {
+      io.emit('control:prev', {
         currentStep: result.data.currentStep,
       });
-      broadcastRoomState(io, roomManager, result.data.roomId);
+      broadcastRoomState(io, roomManager);
+      ack(callback, { success: true, data: null });
+    });
+
+    socket.on('control:start-live', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
+      const identity = getSocketIdentity(socket);
+      if (!identity) {
+        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+        return;
+      }
+
+      const result = roomManager.startLive(identity);
+      if (!result.success) {
+        ack(callback, result);
+        return;
+      }
+
+      io.emit('control:start-live', {
+        phase: result.data.phase,
+        currentStep: result.data.currentStep,
+      });
+      broadcastRoomState(io, roomManager);
+      ack(callback, { success: true, data: null });
+    });
+
+    socket.on('control:return-setup', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
+      const identity = getSocketIdentity(socket);
+      if (!identity) {
+        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+        return;
+      }
+
+      const result = roomManager.returnToSetup(identity);
+      if (!result.success) {
+        ack(callback, result);
+        return;
+      }
+
+      io.emit('control:return-setup', {
+        phase: result.data.phase,
+        currentStep: result.data.currentStep,
+      });
+      broadcastRoomState(io, roomManager);
       ack(callback, { success: true, data: null });
     });
 
@@ -315,20 +306,88 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.to(result.data.roomId).emit('control:ended', {
+      io.emit('control:ended', {
         status: result.data.status,
       });
-      broadcastRoomState(io, roomManager, result.data.roomId);
+      broadcastRoomState(io, roomManager);
       ack(callback, { success: true, data: null });
     });
 
-    socket.on('state:sync-request', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
+    socket.on('pages:update', (payload: PagesUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
       const identity = getSocketIdentity(socket);
       if (!identity) {
         ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
         return;
       }
-      ack(callback, roomManager.getStateByIdentity(identity));
+
+      const result = roomManager.updatePages(identity, payload?.pages ?? []);
+      if (!result.success) {
+        ack(callback, result);
+        return;
+      }
+
+      io.emit('state:sync', {
+        participants: result.data.participants,
+        status: result.data.status,
+        phase: result.data.phase,
+        currentStep: result.data.currentStep,
+        hostId: result.data.hostId,
+        pages: result.data.pages,
+        pageContents: result.data.pageContents,
+      });
+      ack(callback, result);
+    });
+
+    socket.on('page:update', (payload: PageUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
+      const identity = getSocketIdentity(socket);
+      if (!identity) {
+        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+        return;
+      }
+
+      const pageId = payload?.pageId ?? '';
+      const stateBeforeUpdate = roomManager.getStateByIdentity(identity);
+      const previousContent = getPageContentById(stateBeforeUpdate, pageId);
+
+      const content = payload.content
+        ? { type: payload.content.type as 'canvas' | 'image' | 'url' | 'html' | 'markdown', content: payload.content.content }
+        : null;
+
+      const result = roomManager.updatePageContent(identity, pageId, content);
+      if (!result.success) {
+        ack(callback, result);
+        return;
+      }
+
+      cleanupPreviousUploadAsset(previousContent, content);
+
+      io.emit('state:sync', {
+        participants: result.data.participants,
+        status: result.data.status,
+        phase: result.data.phase,
+        currentStep: result.data.currentStep,
+        hostId: result.data.hostId,
+        pages: result.data.pages,
+        pageContents: result.data.pageContents,
+      });
+      ack(callback, result);
+    });
+
+    socket.on('work:submit', (payload: WorkSubmitPayload, callback?: AckFn<SocketResult<unknown>>) => {
+      const identity = getSocketIdentity(socket);
+      if (!identity) {
+        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+        return;
+      }
+
+      const result = roomManager.submitWork(identity, payload?.url ?? '', payload?.description ?? '');
+      if (!result.success) {
+        ack(callback, result);
+        return;
+      }
+
+      broadcastRoomState(io, roomManager);
+      ack(callback, result);
     });
 
     socket.on('disconnect', (reason) => {
@@ -339,15 +398,14 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      socket.to(disconnected.roomId).emit('room:user-offline', { user: disconnected.user });
-      broadcastRoomState(io, roomManager, disconnected.roomId);
+      socket.broadcast.emit('room:user-offline', { user: disconnected.user });
+      broadcastRoomState(io, roomManager);
     });
   });
 }
 
-export function emitRoomClosed(io: Server, roomId: string, reason: RoomCloseReason) {
-  io.to(roomId).emit('room:closed', { reason });
-  io.in(roomId).socketsLeave(roomId);
+export function emitRoomClosed(io: Server, reason: RoomCloseReason) {
+  io.emit('room:closed', { reason });
 }
 
 function getData(socket: Socket): SocketData {
@@ -359,7 +417,7 @@ function getSocketIdentity(socket: Socket): SocketIdentity | null {
   if (!identity) {
     return null;
   }
-  if (!identity.roomId || !identity.userId || !identity.sessionId) {
+  if (!identity.userId || !identity.sessionId) {
     return null;
   }
   return identity;
@@ -386,17 +444,56 @@ function failure(message: string, code: ErrorResponse['code']): SocketResult<nev
   };
 }
 
-function broadcastRoomState(io: Server, roomManager: RoomManager, roomId: string) {
-  const snapshot = roomManager.getPublicRoomSnapshot(roomId);
+function broadcastRoomState(io: Server, roomManager: RoomManager) {
+  const snapshot = roomManager.getPublicRoomSnapshot();
   if (!snapshot.success) {
     return;
   }
 
-  io.to(roomId).emit('state:sync', {
-    roomId: snapshot.data.roomId,
+  io.emit('state:sync', {
     participants: snapshot.data.participants,
     status: snapshot.data.status,
+    phase: snapshot.data.phase,
     currentStep: snapshot.data.currentStep,
     hostId: snapshot.data.hostId,
+    pages: snapshot.data.pages,
+    pageContents: snapshot.data.pageContents,
   });
+}
+
+interface SocketData {
+  identity?: SocketIdentity;
+  authCandidate?: SocketIdentity;
+}
+
+function getPageContentById(
+  state: SocketResult<{
+    pageContents?: Array<[string, PageContent]>;
+  }>,
+  pageId: string,
+): PageContent | null {
+  if (!state.success) {
+    return null;
+  }
+  const entries = state.data.pageContents ?? [];
+  for (const [id, content] of entries) {
+    if (id === pageId) {
+      return content;
+    }
+  }
+  return null;
+}
+
+function cleanupPreviousUploadAsset(previousContent: PageContent | null, nextContent: PageContent | null) {
+  const previousRelativePath = getManagedRelativePathFromContent(previousContent);
+  if (!previousRelativePath) {
+    return;
+  }
+
+  const nextRelativePath = getManagedRelativePathFromContent(nextContent);
+  if (nextRelativePath === previousRelativePath) {
+    return;
+  }
+
+  deleteManagedUploadByRelativePath(previousRelativePath);
 }

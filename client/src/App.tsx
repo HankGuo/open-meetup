@@ -4,141 +4,148 @@ import { Lobby } from './components/Lobby';
 import { JoinPage } from './components/JoinPage';
 import { HostPage } from './pages/HostPage';
 import { ParticipantPage } from './pages/ParticipantPage';
+import { STORAGE_KEYS, clearRoomEntryStorage } from './context/storage';
 
-function getRoomIdFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('room');
+interface CurrentRoomInfo {
+  title: string;
+  status: string;
+  phase: 'setup' | 'live';
+  currentStep: number;
+  totalPages: number;
+  hostId: string;
 }
 
+type AppView = 'checking' | 'lobby' | 'host-pending' | 'join' | 'room';
+
 function AppContent() {
-  const { roomId, myRole, isReconnecting } = useMeeting();
-  const [joinRoomId, setJoinRoomId] = useState<string | null>(null);
-  const [checkingRoom, setCheckingRoom] = useState(false);
-  const [roomError, setRoomError] = useState<string | null>(null);
-  const [initialCheckDone, setInitialCheckDone] = useState(false);
+  const { myRole, myUserId } = useMeeting();
+  const [view, setView] = useState<AppView>('checking');
+  const [currentRoom, setCurrentRoom] = useState<CurrentRoomInfo | null>(null);
 
   useEffect(() => {
-    if (roomId || joinRoomId || checkingRoom || initialCheckDone) {
-      return;
+    checkServerState();
+  }, []);
+
+  // 当已经成功创建/加入房间后，自动进入房间视图
+  useEffect(() => {
+    if (myUserId && (myRole === 'host' || myRole === 'participant')) {
+      setView('room');
     }
+  }, [myUserId, myRole]);
 
-    const roomIdFromUrl = getRoomIdFromUrl();
-    const isHost = localStorage.getItem('open-meetup:isHost') === 'true';
-    const hostRoomId = localStorage.getItem('open-meetup:hostRoomId');
+  async function checkServerState() {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/current`);
+      const data = await response.json();
 
-    if (roomIdFromUrl) {
-      setCheckingRoom(true);
-      setRoomError(null);
+      if (!data.exists) {
+        clearRoomEntryStorage();
+        setCurrentRoom(null);
+        setView('lobby');
+      } else {
+        setCurrentRoom({
+          title: data.title,
+          status: data.status,
+          phase: data.phase || 'setup',
+          currentStep: data.currentStep,
+          totalPages: typeof data.totalPages === 'number' ? data.totalPages : 0,
+          hostId: data.hostId,
+        });
 
-      const checkRoom = async () => {
-        try {
-          const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/check?roomId=${encodeURIComponent(roomIdFromUrl)}`);
-          const data = await response.json();
+        const isHost = localStorage.getItem(STORAGE_KEYS.isHost) === 'true';
 
-          if (data.exists) {
-            setJoinRoomId(roomIdFromUrl.toUpperCase());
-          } else {
-            setRoomError('房间不存在或已关闭');
-            localStorage.removeItem('open-meetup:isHost');
-            localStorage.removeItem('open-meetup:hostRoomId');
-          }
-        } catch (error) {
-          setRoomError('无法验证房间，请稍后重试');
-        } finally {
-          setCheckingRoom(false);
-          setInitialCheckDone(true);
+        if (isHost) {
+          setView('host-pending');
+        } else {
+          setView('join');
         }
-      };
-
-      checkRoom();
-    } else if (isHost && hostRoomId) {
-      setCheckingRoom(true);
-
-      const checkHostRoom = async () => {
-        try {
-          const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/check?roomId=${encodeURIComponent(hostRoomId)}`);
-          const data = await response.json();
-
-          if (data.exists) {
-            window.location.href = `/?room=${hostRoomId}`;
-          } else {
-            localStorage.removeItem('open-meetup:isHost');
-            localStorage.removeItem('open-meetup:hostRoomId');
-          }
-        } catch (error) {
-          // ignore
-        } finally {
-          setCheckingRoom(false);
-          setInitialCheckDone(true);
-        }
-      };
-
-      checkHostRoom();
-    } else {
-      setInitialCheckDone(true);
+      }
+    } catch {
+      clearRoomEntryStorage();
+      setCurrentRoom(null);
+      setView('lobby');
     }
-  }, [roomId, joinRoomId, checkingRoom, initialCheckDone]);
-
-  if (!roomId && isReconnecting) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow p-6 text-center">
-          <p className="text-gray-700 font-medium">正在恢复会议会话...</p>
-          <p className="text-sm text-gray-500 mt-2">请稍候，正在尝试自动重连</p>
-        </div>
-      </div>
-    );
   }
 
-  if (!roomId && checkingRoom) {
+  function handleEnterRoom() {
+    setView('room');
+  }
+
+  function handleBackToLobby() {
+    clearRoomEntryStorage();
+    setCurrentRoom(null);
+    setView('lobby');
+  }
+
+  if (view === 'checking') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="h-full w-full overflow-hidden bg-gray-50 flex items-center justify-center">
         <div className="bg-white rounded-lg shadow p-6 text-center">
-          <p className="text-gray-700 font-medium">正在验证房间...</p>
+          <p className="text-gray-700 font-medium">正在检查房间状态...</p>
           <p className="text-sm text-gray-500 mt-2">请稍候</p>
         </div>
       </div>
     );
   }
 
-  if (!roomId && roomError) {
+  if (view === 'room' && myRole === 'host') {
+    return <HostPage />;
+  }
+
+  if (view === 'room' && myRole === 'participant') {
+    return <ParticipantPage />;
+  }
+
+  if (view === 'host-pending' && currentRoom) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow p-6 text-center max-w-md">
-          <p className="text-red-600 font-medium mb-2">无法加入房间</p>
-          <p className="text-gray-600 text-sm mb-4">{roomError}</p>
-          <a
-            href="/"
-            className="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+      <div className="h-full w-full overflow-hidden bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="w-16 h-16 mx-auto mb-4 bg-indigo-100 rounded-full flex items-center justify-center">
+            <span className="text-3xl">🎤</span>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">欢迎回来，主持人</h1>
+          <p className="text-gray-600 mb-6">系统已有房间进行中</p>
+
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 mb-6">
+            <p className="text-sm text-gray-500 mb-1">当前进度</p>
+            {currentRoom.phase === 'setup' ? (
+              <p className="text-2xl font-bold text-indigo-600">编排阶段</p>
+            ) : (
+              <p className="text-2xl font-bold text-indigo-600">
+                第 {currentRoom.currentStep + 1} / {Math.max(1, currentRoom.totalPages)} 页
+              </p>
+            )}
+          </div>
+
+          <button
+            onClick={handleEnterRoom}
+            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
           >
-            返回首页
-          </a>
+            进入房间
+          </button>
+
+          <button
+            onClick={handleBackToLobby}
+            className="w-full mt-3 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+          >
+            重新创建房间
+          </button>
         </div>
       </div>
     );
   }
 
-  if (!roomId && joinRoomId) {
-    return <JoinPage roomId={joinRoomId} />;
+  if (view === 'join' && currentRoom) {
+    return <JoinPage />;
   }
 
-  if (!roomId) {
-    return <Lobby />;
-  }
-
-  if (myRole === 'host') {
-    return <HostPage />;
-  }
-
-  return <ParticipantPage />;
+  return <Lobby />;
 }
 
-function App() {
+export default function App() {
   return (
     <MeetingProvider>
       <AppContent />
     </MeetingProvider>
   );
 }
-
-export default App;
