@@ -5,6 +5,7 @@ import { JoinPage } from './components/JoinPage';
 import { HostPage } from './pages/HostPage';
 import { ParticipantPage } from './pages/ParticipantPage';
 import { STORAGE_KEYS, clearRoomEntryStorage } from './context/storage';
+import { ArrowRight, LayoutDashboard, Loader2 } from 'lucide-react';
 
 interface CurrentRoomInfo {
   title: string;
@@ -79,10 +80,13 @@ function AppContent() {
 
   if (view === 'checking') {
     return (
-      <div className="h-full w-full overflow-hidden bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow p-6 text-center">
-          <p className="text-gray-700 font-medium">正在检查房间状态...</p>
-          <p className="text-sm text-gray-500 mt-2">请稍候</p>
+      <div className="page-enter flex h-full w-full items-center justify-center overflow-hidden px-4">
+        <div className="glass-panel w-full max-w-md p-7 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-soft)]">
+            <Loader2 className="h-6 w-6 animate-spin text-[var(--accent)]" />
+          </div>
+          <p className="text-base font-semibold text-[var(--text)]">正在检查房间状态</p>
+          <p className="mt-2 text-sm text-[var(--text-soft)]">请稍候，正在连接会议服务</p>
         </div>
       </div>
     );
@@ -98,20 +102,20 @@ function AppContent() {
 
   if (view === 'host-pending' && currentRoom) {
     return (
-      <div className="h-full w-full overflow-hidden bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
-          <div className="w-16 h-16 mx-auto mb-4 bg-indigo-100 rounded-full flex items-center justify-center">
-            <span className="text-3xl">🎤</span>
+      <div className="page-enter flex h-full w-full items-center justify-center overflow-hidden px-4 py-6">
+        <div className="glass-panel w-full max-w-md p-7 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--panel-soft)]">
+            <LayoutDashboard className="h-7 w-7 text-[var(--accent)]" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">欢迎回来，主持人</h1>
-          <p className="text-gray-600 mb-6">系统已有房间进行中</p>
+          <h1 className="text-2xl font-bold text-[var(--text)]">欢迎回来，主持人</h1>
+          <p className="mb-6 mt-2 text-sm text-[var(--text-soft)]">系统已有房间正在进行</p>
 
-          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 mb-6">
-            <p className="text-sm text-gray-500 mb-1">当前进度</p>
+          <div className="app-card mb-6 p-5">
+            <p className="mb-1 text-sm text-[var(--text-soft)]">当前进度</p>
             {currentRoom.phase === 'setup' ? (
-              <p className="text-2xl font-bold text-indigo-600">编排阶段</p>
+              <p className="text-2xl font-bold text-[var(--accent)]">编排阶段</p>
             ) : (
-              <p className="text-2xl font-bold text-indigo-600">
+              <p className="text-2xl font-bold text-[var(--accent)]">
                 第 {currentRoom.currentStep + 1} / {Math.max(1, currentRoom.totalPages)} 页
               </p>
             )}
@@ -119,14 +123,15 @@ function AppContent() {
 
           <button
             onClick={handleEnterRoom}
-            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+            className="btn-base btn-primary w-full"
           >
+            <ArrowRight className="h-4 w-4" />
             进入房间
           </button>
 
           <button
             onClick={handleBackToLobby}
-            className="w-full mt-3 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+            className="btn-base btn-secondary mt-3 w-full"
           >
             重新创建房间
           </button>

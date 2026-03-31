@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMeeting } from '../context/MeetingContext';
-import { Wifi, WifiOff } from 'lucide-react';
+import { Layers, Sparkles, Wifi, WifiOff } from 'lucide-react';
 
 export function Lobby() {
   const { createRoom, isConnected, error, clearError } = useMeeting();
@@ -32,80 +32,103 @@ export function Lobby() {
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-gray-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Open Meetup</h1>
-          {isConnected ? (
-            <span className="flex items-center text-green-600 text-sm">
-              <Wifi className="w-4 h-4 mr-1" /> Connected
-            </span>
-          ) : (
-            <span className="flex items-center text-red-600 text-sm">
-              <WifiOff className="w-4 h-4 mr-1" /> Disconnected
-            </span>
-          )}
+    <main className="page-enter flex h-full w-full items-center justify-center overflow-hidden px-4 py-6 md:px-8">
+      <section className="glass-panel w-full max-w-6xl p-4 md:p-7">
+        <div className="grid gap-6 md:grid-cols-[1.08fr_1fr] md:gap-8">
+          <div className="flex flex-col justify-between gap-6 rounded-2xl border border-[var(--border)] bg-[linear-gradient(145deg,var(--panel),var(--panel-soft))] p-5 md:p-6">
+            <div>
+              <div className="status-pill mb-3 w-max border-[var(--border-light)] bg-[var(--panel-light)] text-[var(--primary)]">
+                <Sparkles className="h-3.5 w-3.5" />
+                生产级主持台
+              </div>
+              <h1 className="text-3xl font-bold tracking-tight text-[var(--text)] md:text-4xl">Open Meetup</h1>
+              <p className="mt-3 text-sm leading-6 text-[var(--text-soft)] md:text-[0.95rem]">
+                一键创建你的实时协作会议，先编排页面再开始播放，让会场控制和参与体验都更稳定。
+              </p>
+            </div>
+
+            <div className="grid gap-3">
+              <div className="app-card p-3.5">
+                <p className="text-xs text-[var(--text-soft)]">会议模式</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--text)]">Setup 先编排 / Live 再播放</p>
+              </div>
+              <div className="app-card p-3.5">
+                <p className="text-xs text-[var(--text-soft)]">核心能力</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--text)]">自由画布 · 名牌广场 · 作品陈列区</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="light-panel p-5 text-[var(--text-inverse)] md:p-6">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-xl font-semibold text-[var(--text-inverse)]">
+                <Layers className="h-5 w-5" />
+                创建房间
+              </h2>
+              {isConnected ? (
+                <span className="status-pill status-pill--online">
+                  <Wifi className="h-3.5 w-3.5" /> Online
+                </span>
+              ) : (
+                <span className="status-pill status-pill--offline">
+                  <WifiOff className="h-3.5 w-3.5" /> Offline
+                </span>
+              )}
+            </div>
+
+            {error && (
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
+                {error}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">您的姓名</span>
+                <input
+                  type="text"
+                  className="app-input app-input-light"
+                  placeholder="请输入姓名"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">房间标题</span>
+                <input
+                  type="text"
+                  className="app-input app-input-light"
+                  placeholder="请输入房间标题"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">授权口令</span>
+                <input
+                  type="password"
+                  className="app-input app-input-light mono"
+                  placeholder="请输入授权口令"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </label>
+
+              <button
+                className="btn-base btn-primary mt-2 w-full disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={handleCreateRoom}
+                disabled={loading || !isConnected}
+              >
+                {loading ? '创建中...' : '创建新会议'}
+              </button>
+            </div>
+
+            <p className="mt-5 text-center text-xs text-[var(--text-soft)]">实时协作会议 · Powered by Socket.IO</p>
+          </div>
         </div>
-
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-            {error}
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              您的姓名
-            </label>
-            <input
-              type="text"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="请输入姓名"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              房间标题
-            </label>
-            <input
-              type="text"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="请输入房间标题"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              授权口令
-            </label>
-            <input
-              type="password"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="请输入授权口令"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-
-          <button
-            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-md transition-colors"
-            onClick={handleCreateRoom}
-            disabled={loading || !isConnected}
-          >
-            {loading ? '创建中...' : '创建新会议'}
-          </button>
-        </div>
-
-        <div className="mt-6 text-center text-sm text-gray-500">
-          <p>实时协作会议 · Powered by Socket.IO</p>
-        </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

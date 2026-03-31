@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, Link2, Send, Sparkles, X } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { User } from '../types';
 
@@ -19,6 +19,7 @@ export function ShowcasePage() {
     [participants],
   );
 
+  const submittedCount = participantWorks.filter((participant) => participant.workUrl && participant.workDescription).length;
   const me = participantWorks.find((participant) => participant.userId === myUserId) ?? null;
 
   useEffect(() => {
@@ -56,123 +57,160 @@ export function ShowcasePage() {
   }
 
   return (
-    <div className="h-full overflow-hidden bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 text-white">
-      <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
-        <div className="mb-6 text-center">
-          <h2 className="text-3xl font-bold">作品展示</h2>
-          <p className="mt-2 text-sm text-blue-100">参与者提交作品链接与一句话描述，主持人可点击作品全屏查看。</p>
-        </div>
+    <div className="h-full w-full p-3 md:p-4">
+      <section className="relative flex h-full w-full flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[linear-gradient(170deg,var(--panel-light),var(--panel-soft))] shadow-[var(--shadow-1)]">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 md:px-5">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel-soft)] px-3 py-1 text-xs font-semibold text-[var(--text-soft)]">
+            <Sparkles className="h-3.5 w-3.5" />
+            作品陈列区
+          </div>
+          <div className="flex items-center gap-2 text-xs text-[var(--text-soft)]">
+            <span className="status-pill">参与者 {participantWorks.length}</span>
+            <span className="status-pill">已提交 {submittedCount}</span>
+          </div>
+        </header>
 
-        {myRole === 'participant' && (
-          <div className="mb-8 rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur">
-            <h3 className="text-lg font-semibold">我的作品</h3>
-            <p className="mt-1 text-xs text-blue-100">提交内容：作品 URL + 一句话描述。可反复提交覆盖更新。</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <input
-                type="url"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://example.com/my-project"
-                className="md:col-span-2 rounded-lg border border-white/30 bg-white/90 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-400"
-              />
+        <div className={`min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-4 ${myRole === 'participant' ? 'grid lg:grid-cols-[320px_minmax(0,1fr)]' : 'flex'}`}>
+          {myRole === 'participant' && (
+            <aside className="flex min-h-0 flex-col rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-4">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--text)]">我的作品</h3>
+                <p className="mt-1 text-xs text-[var(--text-soft)]">提交 URL + 一句话描述，可重复更新。</p>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2">
+                <label className="text-xs font-medium text-[var(--text-soft)]" htmlFor="work-url-input">
+                  作品链接
+                </label>
+                <input
+                  id="work-url-input"
+                  type="url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://example.com/my-project"
+                  className="app-input app-input-light"
+                />
+              </div>
+
+              <div className="mt-3 flex flex-col gap-2">
+                <label className="text-xs font-medium text-[var(--text-soft)]" htmlFor="work-desc-input">
+                  一句话描述
+                </label>
+                <textarea
+                  id="work-desc-input"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="一句话描述你的作品亮点"
+                  maxLength={120}
+                  className="app-input app-input-light h-24 resize-none"
+                />
+              </div>
+
+              <div className="mt-3 flex items-center justify-between text-xs text-[var(--text-soft)]">
+                <span>{description.trim().length}/120</span>
+                {me?.workUpdatedAt ? <span>上次：{new Date(me.workUpdatedAt).toLocaleString()}</span> : <span>尚未提交</span>}
+              </div>
+
+              {submitError ? <p className="mt-2 text-xs text-[var(--danger)]">{submitError}</p> : null}
+
               <button
                 type="button"
                 onClick={handleSubmit}
                 disabled={submitting || !isConnected}
-                className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-gray-900 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-cyan-200"
+                className="btn-base btn-primary mt-4 h-10 disabled:cursor-not-allowed disabled:opacity-50"
               >
+                <Send className="h-4 w-4" />
                 {submitting ? '提交中...' : '提交作品'}
               </button>
-            </div>
-            <textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="一句话描述你的作品亮点"
-              maxLength={120}
-              className="mt-3 h-20 w-full resize-none rounded-lg border border-white/30 bg-white/90 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-400"
-            />
-            <div className="mt-2 flex items-center justify-between text-xs text-blue-100">
-              <span>{description.trim().length}/120</span>
-              {me?.workUpdatedAt ? <span>上次提交：{new Date(me.workUpdatedAt).toLocaleString()}</span> : <span>尚未提交</span>}
-            </div>
-            {submitError && <p className="mt-2 text-xs text-rose-200">{submitError}</p>}
-          </div>
-        )}
+            </aside>
+          )}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {participantWorks.map((participant) => {
-            const hasWork = Boolean(participant.workUrl && participant.workDescription);
-            return (
-              <button
-                type="button"
-                key={participant.userId}
-                disabled={!hasWork}
-                onClick={() => hasWork && setSelectedWork(participant)}
-                className={`group overflow-hidden rounded-2xl border text-left transition ${
-                  hasWork
-                    ? 'border-white/25 bg-white/10 hover:-translate-y-0.5 hover:border-cyan-300 hover:bg-white/15'
-                    : 'border-white/10 bg-black/20 opacity-80'
-                }`}
-              >
-                <div className="relative h-44 bg-black/40">
-                  {hasWork ? (
-                    isImageUrl(participant.workUrl!) ? (
-                      <img src={participant.workUrl} alt={participant.userName} className="h-full w-full object-cover" />
-                    ) : (
-                      <iframe
-                        src={participant.workUrl}
-                        title={`${participant.userName}-work-thumb`}
-                        className="h-full w-full border-0 pointer-events-none"
-                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                      />
-                    )
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-sm text-blue-100/80">暂未提交作品</div>
-                  )}
-                  {hasWork && (
-                    <div className="absolute inset-0 hidden items-end bg-gradient-to-t from-black/60 to-transparent p-3 text-xs text-white group-hover:flex">
-                      点击全屏查看
-                    </div>
-                  )}
+          <div className="min-h-0 flex-1 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 md:p-4">
+            {participantWorks.length === 0 ? (
+              <div className="flex h-full min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)] px-6 text-center">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text)]">暂无参与者作品</p>
+                  <p className="mt-1 text-sm text-[var(--text-soft)]">成员提交作品后会自动出现在陈列区中。</p>
                 </div>
-                <div className="p-4">
-                  <div className="mb-2 flex items-center gap-2">
-                    {participant.avatar ? (
-                      <img src={participant.avatar} alt={participant.userName} className="h-8 w-8 rounded-full object-cover" />
-                    ) : (
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold">
-                        {participant.userName?.charAt(0)?.toUpperCase() || '?'}
+              </div>
+            ) : (
+              <div className="grid max-h-full grid-cols-1 gap-3 overflow-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
+                {participantWorks.map((participant) => {
+                  const hasWork = Boolean(participant.workUrl && participant.workDescription);
+                  return (
+                    <button
+                      type="button"
+                      key={participant.userId}
+                      disabled={!hasWork}
+                      onClick={() => hasWork && setSelectedWork(participant)}
+                      className={`group overflow-hidden rounded-2xl border text-left transition ${
+                        hasWork
+                          ? 'border-[var(--border)] bg-[var(--panel)] hover:-translate-y-0.5 hover:border-[var(--primary)]/50 hover:bg-[var(--panel-light)]'
+                          : 'border-[var(--border)] bg-[var(--panel-soft)] opacity-80'
+                      }`}
+                    >
+                      <div className="relative h-36 bg-[var(--panel-soft)]">
+                        {hasWork ? (
+                          isImageUrl(participant.workUrl!) ? (
+                            <img src={participant.workUrl} alt={participant.userName} className="h-full w-full object-cover" />
+                          ) : (
+                            <iframe
+                              src={participant.workUrl}
+                              title={`${participant.userName}-work-thumb`}
+                              className="pointer-events-none h-full w-full border-0"
+                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                            />
+                          )
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-xs text-[var(--text-soft)]">暂未提交作品</div>
+                        )}
+
+                        {hasWork ? (
+                          <div className="absolute inset-x-0 bottom-0 hidden items-center gap-1 bg-gradient-to-t from-[oklch(1_0_0_/0.95)] to-transparent px-3 py-2 text-[11px] text-[var(--text)] group-hover:flex">
+                            <Link2 className="h-3.5 w-3.5" />
+                            点击全屏查看
+                          </div>
+                        ) : null}
                       </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{participant.userName}</p>
-                      <p className="text-xs text-blue-100/80">{participant.online ? '在线' : '离线'}</p>
-                    </div>
-                  </div>
-                  <p className="line-clamp-2 text-xs text-blue-100/90">
-                    {participant.workDescription || '这位参与者还没有提交作品描述。'}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
+
+                      <div className="p-3">
+                        <div className="mb-2 flex items-center gap-2">
+                          <Avatar participant={participant} />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[var(--text)]">{participant.userName}</p>
+                            <p className="text-xs text-[var(--text-soft)]">{participant.online ? '在线' : '离线'}</p>
+                          </div>
+                        </div>
+                        <p className="line-clamp-2 text-xs text-[var(--text-soft)]">
+                          {participant.workDescription || '这位参与者还没有提交作品描述。'}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
 
       {selectedWork && selectedWork.workUrl && (
-        <div className="fixed inset-0 z-50 bg-black/90 p-4 md:p-8" onClick={() => setSelectedWork(null)}>
-          <div className="mx-auto flex h-full w-full max-w-6xl flex-col rounded-xl bg-slate-950" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4 text-white">
-              <div>
-                <p className="text-lg font-semibold">{selectedWork.userName} 的作品</p>
-                <p className="mt-1 text-sm text-blue-100">{selectedWork.workDescription}</p>
+        <div className="fixed inset-0 z-50 bg-[oklch(0.42_0.015_255_/0.28)] p-4 backdrop-blur-sm md:p-8" onClick={() => setSelectedWork(null)}>
+          <div
+            className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel-light)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4 text-[var(--text)]">
+              <div className="min-w-0">
+                <p className="truncate text-lg font-semibold">{selectedWork.userName} 的作品</p>
+                <p className="mt-1 line-clamp-2 text-sm text-[var(--text-soft)]">{selectedWork.workDescription}</p>
               </div>
               <div className="flex items-center gap-2">
                 <a
                   href={selectedWork.workUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md bg-white/10 px-3 py-1.5 text-xs hover:bg-white/20"
+                  className="btn-base btn-secondary h-9 rounded-md px-3 text-xs"
                 >
                   打开链接
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -180,13 +218,13 @@ export function ShowcasePage() {
                 <button
                   type="button"
                   onClick={() => setSelectedWork(null)}
-                  className="rounded-md bg-white/10 p-2 hover:bg-white/20"
+                  className="btn-base btn-secondary h-9 w-9 rounded-md p-0"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 bg-black">
+            <div className="min-h-0 flex-1 bg-[var(--panel-soft)]">
               {isImageUrl(selectedWork.workUrl) ? (
                 <img src={selectedWork.workUrl} alt={selectedWork.userName} className="h-full w-full object-contain" />
               ) : (
@@ -201,6 +239,20 @@ export function ShowcasePage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function Avatar({ participant }: { participant: User }) {
+  const fallback = participant.userName?.trim()?.charAt(0)?.toUpperCase() || '?';
+
+  if (participant.avatar) {
+    return <img src={participant.avatar} alt={participant.userName} className="h-9 w-9 rounded-full border border-[var(--border)] object-cover" />;
+  }
+
+  return (
+    <div className="avatar-fallback h-9 w-9 text-xs font-semibold">
+      {fallback}
     </div>
   );
 }

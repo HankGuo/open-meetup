@@ -514,9 +514,6 @@ export class RoomManager {
     if (!normalizedPages) {
       return this.fail('页面配置不合法', 'BAD_REQUEST');
     }
-    if (normalizedPages.length === 0) {
-      return this.fail('至少保留一个页面', 'BAD_REQUEST');
-    }
     if (normalizedPages.length > MAX_MEETING_PAGES) {
       return this.fail(`页面数量不能超过 ${MAX_MEETING_PAGES} 个`, 'BAD_REQUEST');
     }

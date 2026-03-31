@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, CircleDot, Crown, Users, X } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { User } from '../types';
 
-const MAX_VISIBLE_OTHERS = 10;
+const INLINE_PREVIEW_LIMIT = 4;
+const MENU_LIMIT = 10;
 const MEDAL_TEXT = ['金', '银', '铜'];
 const MEDAL_STYLE = [
   'bg-amber-300 text-amber-950 border-amber-200',
@@ -12,12 +14,39 @@ const MEDAL_STYLE = [
 ];
 
 interface ParticipantRosterBarProps {
-  pageTitle?: string;
+  topActions?: ReactNode;
 }
 
-export function ParticipantRosterBar({ pageTitle }: ParticipantRosterBarProps) {
+export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) {
   const { participants, hostId, myUserId } = useMeeting();
+  const [showMenu, setShowMenu] = useState(false);
   const [showFullList, setShowFullList] = useState(false);
+  const menuRootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!showMenu) {
+      return;
+    }
+
+    function handleOutsideClick(event: MouseEvent) {
+      if (!menuRootRef.current?.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+
+    function handleEsc(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setShowMenu(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [showMenu]);
 
   const sortedParticipants = useMemo(
     () => [...participants].sort((a, b) => a.joinedAt - b.joinedAt),
@@ -26,15 +55,28 @@ export function ParticipantRosterBar({ pageTitle }: ParticipantRosterBarProps) {
 
   const host = sortedParticipants.find((participant) => participant.userId === hostId) ?? null;
   const me = sortedParticipants.find((participant) => participant.userId === myUserId) ?? null;
-
-  const others = useMemo(
-    () => sortedParticipants.filter((participant) => participant.userId !== hostId && participant.userId !== myUserId),
-    [hostId, myUserId, sortedParticipants],
-  );
-
-  const visibleOthers = others.slice(0, MAX_VISIBLE_OTHERS);
-  const hiddenCount = Math.max(0, others.length - MAX_VISIBLE_OTHERS);
+  const others = sortedParticipants.filter((participant) => participant.userId !== hostId && participant.userId !== myUserId);
+  const hostAndMeAreSame = host && me && host.userId === me.userId;
   const onlineCount = sortedParticipants.filter((participant) => participant.online).length;
+  const menuMembers = sortedParticipants.slice(0, MENU_LIMIT);
+  const hiddenMenuCount = Math.max(0, sortedParticipants.length - MENU_LIMIT);
+
+  const previewParticipants = useMemo(() => {
+    const preview: User[] = [];
+    if (host) {
+      preview.push(host);
+    }
+    if (me && (!host || me.userId !== host.userId)) {
+      preview.push(me);
+    }
+    for (const participant of others) {
+      if (preview.length >= INLINE_PREVIEW_LIMIT) {
+        break;
+      }
+      preview.push(participant);
+    }
+    return preview.slice(0, INLINE_PREVIEW_LIMIT);
+  }, [host, me, others]);
 
   const otherRankMap = useMemo(() => {
     const rankMap = new Map<string, number>();
@@ -44,62 +86,116 @@ export function ParticipantRosterBar({ pageTitle }: ParticipantRosterBarProps) {
     return rankMap;
   }, [others]);
 
-  const hostAndMeAreSame = host && me && host.userId === me.userId;
-
   return (
     <>
-      <div className="flex-shrink-0 border-b border-white/10 bg-slate-900/90 px-4 py-3 backdrop-blur-md">
-        <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3">
-          <PersonBadge person={host} label={hostAndMeAreSame ? '主持人 / 我' : '主持人'} />
-          {!hostAndMeAreSame && <PersonBadge person={me} label="我" />}
+      <div className="pointer-events-none absolute inset-x-0 top-2 z-30 px-3 md:px-4">
+        <div className="pointer-events-auto mx-auto w-full">
+          <div className="stage-topbar-surface flex h-10 items-center justify-between gap-2 px-1.5">
+            <div ref={menuRootRef} className="relative min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => setShowMenu((prev) => !prev)}
+                className="stage-topbar-trigger flex h-8 w-full min-w-0 items-center gap-2 px-2"
+                aria-haspopup="menu"
+                aria-expanded={showMenu}
+              >
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--panel-soft)]">
+                  <Users className="h-3.5 w-3.5 text-[var(--text-soft)]" />
+                </span>
 
-          <div className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">
-                加入成员（按加入时间）
-              </p>
-              <div className="flex items-center gap-2">
-                {pageTitle ? <p className="truncate text-xs text-slate-400">{pageTitle}</p> : null}
-                <p className="whitespace-nowrap text-xs text-slate-400">
+                <span className="shrink-0 text-xs font-semibold">成员 {sortedParticipants.length}</span>
+
+                <div className="hidden min-w-0 flex-1 items-center -space-x-1.5 sm:flex">
+                  {previewParticipants.map((participant, index) => {
+                    const tone = index === 0 ? 'border-amber-300' : index === 1 && !hostAndMeAreSame ? 'border-indigo-300' : 'border-[var(--border)]';
+                    return (
+                      <AvatarCircle
+                        key={participant.userId}
+                        participant={participant}
+                        sizeClassName={`h-5 w-5 border ${tone}`}
+                      />
+                    );
+                  })}
+                </div>
+
+                <span className="hidden shrink-0 text-[11px] text-[var(--text-soft)] md:inline">
                   在线 {onlineCount}/{sortedParticipants.length}
-                </p>
-              </div>
+                </span>
+
+                <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--text-soft)] transition ${showMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showMenu ? (
+                <div className="stage-topbar-popover absolute left-0 top-[calc(100%+8px)] w-[min(92vw,360px)] overflow-hidden p-2 text-[var(--text)]">
+                  <div className="mb-1 flex items-center justify-between px-2 py-1">
+                    <p className="text-xs font-semibold text-[var(--text-soft)]">已加入人员（按时间）</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowMenu(false)}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--text-soft)] hover:bg-[var(--panel-soft)]"
+                      aria-label="关闭名单菜单"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="max-h-[50vh] overflow-auto pr-1">
+                    {menuMembers.map((participant, index) => {
+                      const isHost = participant.userId === hostId;
+                      const isMe = participant.userId === myUserId;
+                      const rank = otherRankMap.get(participant.userId) ?? null;
+                      return (
+                        <div
+                          key={participant.userId}
+                          className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-[var(--panel-soft)]"
+                        >
+                          <span className="w-5 text-center text-[11px] text-[var(--text-soft)]">{index + 1}</span>
+                          <AvatarCircle participant={participant} sizeClassName="h-7 w-7 border border-[var(--border)]" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-semibold text-[var(--text)]">{participant.userName}</p>
+                            <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--text-soft)]">
+                              {isHost ? <Crown className="h-3 w-3 text-amber-500" /> : null}
+                              <span>{isHost ? '主持人' : isMe ? '我' : '参与者'}</span>
+                              <CircleDot className={`h-2.5 w-2.5 ${participant.online ? 'text-emerald-500' : 'text-[var(--text-soft)]'}`} />
+                              <span>{participant.online ? '在线' : '离线'}</span>
+                            </div>
+                          </div>
+                          {rank && rank <= 3 ? <Medal rank={rank} /> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {hiddenMenuCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMenu(false);
+                        setShowFullList(true);
+                      }}
+                      className="mt-2 w-full rounded-xl border border-dashed border-[var(--border)] px-2 py-1.5 text-xs text-[var(--text-soft)] hover:border-[var(--primary)]/45 hover:text-[var(--text)]"
+                    >
+                      查看完整名单（{sortedParticipants.length} 人）
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              {visibleOthers.map((participant, index) => (
-                <AvatarChip key={participant.userId} participant={participant} rank={index + 1} />
-              ))}
-
-              {hiddenCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowFullList(true)}
-                  className="flex h-10 min-w-[64px] items-center justify-center rounded-full border border-dashed border-slate-500 px-3 text-xs font-medium text-slate-200 transition-colors hover:border-slate-300 hover:text-white"
-                  title="查看完整人员名单"
-                >
-                  ... +{hiddenCount}
-                </button>
-              )}
-
-              {others.length === 0 && <p className="text-xs text-slate-400">暂无其他参与者</p>}
-            </div>
+            {topActions ? <div className="flex shrink-0 items-center gap-1 px-0.5">{topActions}</div> : null}
           </div>
         </div>
       </div>
 
-      {showFullList && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 pt-20" onClick={() => setShowFullList(false)}>
-          <div
-            className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <h3 className="text-base font-semibold text-slate-900">完整人员名单（按加入时间）</h3>
+      {showFullList ? (
+        <div className="dialog-overlay fixed inset-0 z-50 flex items-start justify-center p-4 pt-20" onClick={() => setShowFullList(false)}>
+          <div className="dialog-panel w-full max-w-2xl overflow-hidden" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+              <h3 className="text-base font-semibold text-[var(--text)]">完整人员名单（按加入时间）</h3>
               <button
                 type="button"
                 onClick={() => setShowFullList(false)}
-                className="rounded-full p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                className="btn-base h-9 w-9 rounded-full border border-[var(--border)] bg-[var(--panel-light)] p-0 text-[var(--text)]"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -110,32 +206,35 @@ export function ParticipantRosterBar({ pageTitle }: ParticipantRosterBarProps) {
                 const isHost = participant.userId === hostId;
                 const isMe = participant.userId === myUserId;
                 const rank = otherRankMap.get(participant.userId) ?? null;
-                const badgeText = buildIdentityBadgeText(isHost, isMe);
 
                 return (
-                  <div key={participant.userId} className="flex items-center gap-3 border-b border-slate-100 px-5 py-3 last:border-b-0">
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                  <div key={participant.userId} className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--panel-soft)] text-xs font-semibold text-[var(--text-soft)]">
                       {index + 1}
                     </div>
-
                     <AvatarCircle participant={participant} sizeClassName="h-10 w-10" />
-
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-900">{participant.userName}</p>
+                      <p className="truncate text-sm font-semibold text-[var(--text)]">{participant.userName}</p>
                       <div className="mt-1 flex items-center gap-2">
-                        {badgeText ? (
-                          <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">{badgeText}</span>
+                        {isHost ? (
+                          <span className="rounded-full border border-amber-300 bg-amber-100/80 px-2 py-0.5 text-xs font-medium text-amber-700">
+                            主持人
+                          </span>
+                        ) : null}
+                        {!isHost && isMe ? (
+                          <span className="rounded-full border border-indigo-300 bg-indigo-100/80 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                            我
+                          </span>
                         ) : null}
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                            participant.online ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                            participant.online ? 'bg-emerald-100 text-emerald-700' : 'bg-[var(--panel-soft)] text-[var(--text-soft)]'
                           }`}
                         >
                           {participant.online ? '在线' : '离线'}
                         </span>
                       </div>
                     </div>
-
                     {rank && rank <= 3 ? <Medal rank={rank} /> : null}
                   </div>
                 );
@@ -143,32 +242,8 @@ export function ParticipantRosterBar({ pageTitle }: ParticipantRosterBarProps) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </>
-  );
-}
-
-function PersonBadge({ person, label }: { person: User | null; label: string }) {
-  return (
-    <div className="flex w-[128px] flex-shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-2">
-      <AvatarCircle participant={person} sizeClassName="h-9 w-9" />
-      <div className="min-w-0">
-        <p className="truncate text-[11px] font-medium text-slate-400">{label}</p>
-        <p className="truncate text-xs font-semibold text-white">{person?.userName || '未加入'}</p>
-      </div>
-    </div>
-  );
-}
-
-function AvatarChip({ participant, rank }: { participant: User; rank: number }) {
-  return (
-    <div className={`group relative flex items-center ${participant.online ? '' : 'opacity-50'}`}>
-      <AvatarCircle participant={participant} sizeClassName="h-10 w-10 border-2 border-slate-900" />
-      {rank <= 3 ? <Medal rank={rank} /> : null}
-      <span className="pointer-events-none absolute left-1/2 top-12 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-950 px-2 py-1 text-xs text-white group-hover:block">
-        {participant.userName}
-      </span>
-    </div>
   );
 }
 
@@ -177,7 +252,8 @@ function Medal({ rank }: { rank: number }) {
   const style = MEDAL_STYLE[rank - 1];
   return (
     <span
-      className={`absolute -right-1 -top-1 inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold shadow-sm ${style}`}
+      className={`inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold shadow-sm ${style}`}
+      title={`第 ${rank} 位加入`}
     >
       {text}
     </span>
@@ -188,18 +264,12 @@ function AvatarCircle({ participant, sizeClassName }: { participant: User | null
   const fallbackText = getFallbackAvatarText(participant);
 
   if (participant?.avatar) {
-    return (
-      <img
-        src={participant.avatar}
-        alt={participant.userName}
-        className={`${sizeClassName} rounded-full object-cover`}
-      />
-    );
+    return <img src={participant.avatar} alt={participant.userName} className={`${sizeClassName} rounded-full object-cover`} />;
   }
 
   return (
     <div
-      className={`${sizeClassName} flex items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-cyan-500 text-sm font-semibold text-white`}
+      className={`${sizeClassName} avatar-fallback text-[11px] font-semibold`}
     >
       {fallbackText}
     </div>
@@ -211,17 +281,4 @@ function getFallbackAvatarText(participant: User | null): string {
     return '?';
   }
   return participant.userName.trim().charAt(0).toUpperCase();
-}
-
-function buildIdentityBadgeText(isHost: boolean, isMe: boolean): string {
-  if (isHost && isMe) {
-    return '主持人 / 我';
-  }
-  if (isHost) {
-    return '主持人';
-  }
-  if (isMe) {
-    return '我';
-  }
-  return '';
 }

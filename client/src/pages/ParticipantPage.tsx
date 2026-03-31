@@ -5,27 +5,31 @@ import { LogOut } from 'lucide-react';
 export function ParticipantPage() {
   const { leaveRoom, phase, title } = useMeeting();
 
+  const liveTopActions = (
+    <button
+      type="button"
+      onClick={() => void leaveRoom()}
+      aria-label="退出"
+      title="退出"
+      className="stage-action-btn"
+    >
+      <LogOut className="h-3.5 w-3.5" />
+    </button>
+  );
+
   return (
-    <div className="h-full w-full overflow-hidden flex flex-col bg-gray-900">
+    <div className="page-enter relative flex h-full w-full flex-col overflow-hidden">
       {phase === 'setup' ? (
-        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-6">
-          <div className="max-w-lg rounded-2xl border border-white/10 bg-white/5 p-8 text-center text-white backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.22em] text-emerald-300">准备中</p>
-            <h2 className="mt-2 text-2xl font-semibold">{title || '会议'}</h2>
-            <p className="mt-3 text-sm text-slate-200">主持人正在编排页面，确认后会自动进入播放环节。</p>
+        <div className="flex h-full w-full items-center justify-center px-6">
+          <div className="glass-panel max-w-lg p-8 text-center">
+            <p className="status-pill mx-auto w-max border-[var(--border-light)] bg-[var(--panel-light)] text-[var(--accent)]">准备中</p>
+            <h2 className="mt-2 text-2xl font-semibold text-[var(--text)]">{title || '会议'}</h2>
+            <p className="mt-3 text-sm text-[var(--text-soft)]">主持人正在编排页面，确认后会自动进入播放环节。</p>
           </div>
         </div>
       ) : (
-        <MeetingStage />
+        <MeetingStage topActions={liveTopActions} />
       )}
-
-      <button
-        onClick={() => void leaveRoom()}
-        className="absolute top-20 right-4 flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-md transition-colors z-20"
-      >
-        <LogOut className="w-4 h-4" />
-        退出
-      </button>
     </div>
   );
 }

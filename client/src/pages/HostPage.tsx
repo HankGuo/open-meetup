@@ -22,37 +22,47 @@ export function HostPage() {
     await returnToSetup();
   }
 
+  const liveTopActions = (
+    <>
+      <button
+        type="button"
+        onClick={() => void leaveRoom()}
+        aria-label="退出"
+        title="退出"
+        className="stage-action-btn"
+      >
+        <LogOut className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={handleReturnToSetup}
+        aria-label="返回编辑页"
+        title="返回编辑页"
+        className="stage-action-btn stage-action-btn--accent"
+      >
+        <ArrowLeftCircle className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={handleEndRoom}
+        aria-label="结束房间"
+        title="结束房间"
+        className="stage-action-btn stage-action-btn--danger"
+      >
+        <XCircle className="h-3.5 w-3.5" />
+      </button>
+    </>
+  );
+
   return (
-    <div className="h-full w-full overflow-hidden flex flex-col bg-gray-900">
-      {phase === 'setup' ? <HostSetupBoard defaultSelectedPageId={setupFocusPageId} /> : <MeetingStage />}
+    <div className="page-enter relative flex h-full w-full flex-col overflow-hidden">
+      {phase === 'setup' ? (
+        <HostSetupBoard defaultSelectedPageId={setupFocusPageId} />
+      ) : (
+        <MeetingStage topActions={liveTopActions} />
+      )}
 
       {phase === 'live' ? <HostControls /> : null}
-
-      {phase === 'live' ? (
-        <button
-          onClick={handleReturnToSetup}
-          className="absolute right-40 top-20 z-30 flex items-center gap-2 rounded-md bg-amber-500/90 px-4 py-2 text-white transition-colors hover:bg-amber-500"
-        >
-          <ArrowLeftCircle className="h-4 w-4" />
-          返回编辑页
-        </button>
-      ) : null}
-
-      <button
-        onClick={handleEndRoom}
-        className="absolute right-4 top-20 z-30 flex items-center gap-2 rounded-md bg-red-600/80 px-4 py-2 text-white transition-colors hover:bg-red-600"
-      >
-        <XCircle className="w-4 h-4" />
-        结束房间
-      </button>
-
-      <button
-        onClick={() => void leaveRoom()}
-        className="absolute left-4 top-20 z-30 flex items-center gap-2 rounded-md bg-white/10 px-4 py-2 text-white transition-colors hover:bg-white/20"
-      >
-        <LogOut className="w-4 h-4" />
-        退出
-      </button>
     </div>
   );
 }

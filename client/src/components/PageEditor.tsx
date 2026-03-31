@@ -107,19 +107,28 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 p-4">
-      <div className="mx-auto flex h-full w-full max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <h3 className="text-base font-bold text-slate-900">Excalidraw 画布编辑器 · 第 {pageIndex + 1} 页</h3>
-          <button onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-slate-100">
+    <div className="dialog-overlay fixed inset-0 z-50 p-3 md:p-5">
+      <div className="dialog-panel mx-auto flex h-full w-full max-w-[1500px] flex-col overflow-hidden">
+        <header className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-4 py-3 md:px-5">
+          <div>
+            <p className="section-title">Canvas Editor</p>
+            <h3 className="text-base font-bold text-[var(--text)] md:text-lg">Excalidraw 编辑器 · 第 {pageIndex + 1} 页</h3>
+            <p className="mt-1 text-xs text-[var(--text-soft)]">编辑态显示网格；保存后在播放态将自动隐藏网格。</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭编辑器"
+            className="btn-base h-10 w-10 rounded-full border border-[var(--border)] bg-[var(--panel-light)] p-0 text-[var(--text)]"
+          >
             <X className="h-5 w-5" />
           </button>
-        </div>
+        </header>
 
-        <div className="min-h-0 flex-1 bg-slate-100">
+        <div className="min-h-0 flex-1 bg-[var(--panel-light)]">
           <Suspense
             fallback={
-              <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">画布加载中...</div>
+              <div className="flex h-full w-full items-center justify-center text-sm text-[var(--text-soft)]">画布加载中...</div>
             }
           >
             <ExcalidrawCanvas
@@ -177,12 +186,12 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
           </Suspense>
         </div>
 
-        <div className="flex items-center gap-3 border-t bg-slate-50 px-5 py-3">
+        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] bg-[var(--panel)] px-4 py-3 md:px-5">
           <button
             type="button"
             onClick={handleClear}
             disabled={saving}
-            className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-base btn-danger-soft h-10 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Trash2 className="h-4 w-4" />
             清空页面
@@ -192,7 +201,7 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-200"
+            className="btn-base btn-secondary h-10"
           >
             取消
           </button>
@@ -200,7 +209,7 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-base btn-primary h-10 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Upload className="h-4 w-4" />
             {saving ? '保存中...' : '保存画布'}

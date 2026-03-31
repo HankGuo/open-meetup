@@ -1,19 +1,24 @@
+import type { ReactNode } from 'react';
 import { useMeeting } from '../context/MeetingContext';
 import { ContentViewer } from './ContentViewer';
 import { ParticipantRosterBar } from './ParticipantRosterBar';
 import { SelfIntroPage } from './SelfIntroPage';
 import { ShowcasePage } from './ShowcasePage';
 
-export function MeetingStage() {
+interface MeetingStageProps {
+  topActions?: ReactNode;
+}
+
+export function MeetingStage({ topActions }: MeetingStageProps) {
   const { currentStep, pages } = useMeeting();
   const currentPage = pages[currentStep];
   return (
-    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-      <ParticipantRosterBar pageTitle={currentPage?.title} />
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pt-11 md:pt-12">
+      <ParticipantRosterBar topActions={topActions} />
 
       {!currentPage && (
-        <div className="flex-1 flex items-center justify-center bg-gray-50">
-          <p className="text-gray-400">内容加载中...</p>
+        <div className="flex flex-1 items-center justify-center bg-[var(--panel-soft)]">
+          <p className="text-sm text-[var(--text-soft)]">内容加载中...</p>
         </div>
       )}
 

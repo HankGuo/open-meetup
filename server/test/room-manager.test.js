@@ -17,10 +17,35 @@ function getHostIdentity(createResult) {
   };
 }
 
+function createPagesForSetup() {
+  return [
+    { id: 'page-canvas-a', theme: 1, kind: 'canvas', title: '自由画布 1' },
+    { id: 'page-intro-a', theme: 2, kind: 'selfIntro', title: '名牌广场 1' },
+    { id: 'page-canvas-b', theme: 1, kind: 'canvas', title: '自由画布 2' },
+    { id: 'page-canvas-c', theme: 1, kind: 'canvas', title: '自由画布 3' },
+    { id: 'page-showcase-a', theme: 3, kind: 'showcase', title: '作品陈列 1' },
+    { id: 'page-canvas-d', theme: 1, kind: 'canvas', title: '自由画布 4' },
+  ];
+}
+
+function seedPages(manager, hostIdentity, pages = createPagesForSetup()) {
+  const result = manager.updatePages(hostIdentity, pages);
+  assert.equal(result.success, true);
+  return pages;
+}
+
+test('new room should start with no preconfigured pages', () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  assert.equal(created.data.pages.length, 0);
+});
+
 test('nextStep should be capped at max page index', () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   const hostIdentity = getHostIdentity(created);
+  seedPages(manager, hostIdentity);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
 
@@ -39,7 +64,8 @@ test('setup phase allows editing pages but live phase blocks editing', () => {
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const pageId = created.data.pages[0].id;
+  const pages = seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
+  const pageId = pages[0].id;
 
   const setupEdit = manager.updatePageContent(hostIdentity, pageId, {
     type: 'markdown',
@@ -63,7 +89,8 @@ test('host can reorder pages during setup and content follows page id', () => {
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const [firstPage, secondPage] = created.data.pages;
+  const pages = seedPages(manager, hostIdentity, createPagesForSetup().slice(0, 3));
+  const [firstPage, secondPage] = pages;
   assert.ok(firstPage && secondPage);
 
   const contentWrite = manager.updatePageContent(hostIdentity, firstPage.id, {
@@ -72,7 +99,7 @@ test('host can reorder pages during setup and content follows page id', () => {
   });
   assert.equal(contentWrite.success, true);
 
-  const reordered = [secondPage, firstPage, ...created.data.pages.slice(2)];
+  const reordered = [secondPage, firstPage, ...pages.slice(2)];
   const updatePages = manager.updatePages(hostIdentity, reordered);
   assert.equal(updatePages.success, true);
 
@@ -85,6 +112,7 @@ test('host can return from live to setup and keep current page index', () => {
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
+  seedPages(manager, hostIdentity);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
 
@@ -95,6 +123,18 @@ test('host can return from live to setup and keep current page index', () => {
   assert.equal(returned.success, true);
   assert.equal(returned.data.phase, 'setup');
   assert.equal(returned.data.currentStep, 2);
+});
+
+test('setup phase should allow removing all pages', () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
+
+  const removed = manager.updatePages(hostIdentity, []);
+  assert.equal(removed.success, true);
+  assert.equal(removed.data.pages.length, 0);
 });
 
 test('ticket join should restore existing participant instead of creating duplicate', () => {

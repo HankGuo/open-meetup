@@ -26,6 +26,7 @@ export function ContentViewer({ pageId, pageIndex }: ContentViewerProps) {
   const lockingSceneRef = useRef(false);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const content = pageContents.get(pageId);
+  const hasSavedContent = Boolean(content?.content?.trim());
 
   const initialData = useMemo(() => getInitialExcalidrawData(content), [content]);
   const sceneKey = `${pageIndex}-${sceneVersion}`;
@@ -37,41 +38,57 @@ export function ContentViewer({ pageId, pageIndex }: ContentViewerProps) {
   }, [content, pageIndex, pageId]);
 
   return (
-    <div className="relative h-full w-full bg-slate-100">
-      <div className="h-full w-full">
-        <Suspense
-          fallback={
-            <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">画布加载中...</div>
-          }
-        >
-          <ExcalidrawCanvas
-            key={sceneKey}
-            initialData={initialData}
-            viewModeEnabled={true}
-            zenModeEnabled={true}
-            gridModeEnabled={false}
-            validateEmbeddable={isSupportedEmbeddableUrl}
-            excalidrawAPI={(api) => {
-              excalidrawApiRef.current = api;
-              lockViewerScene(api, lockingSceneRef);
-            }}
-            onChange={(elements, appState) => {
-              lockViewerScene(excalidrawApiRef.current, lockingSceneRef, elements, appState);
-            }}
-            UIOptions={{
-              canvasActions: {
-                changeViewBackgroundColor: false,
-                clearCanvas: false,
-                export: false,
-                loadScene: false,
-                saveToActiveFile: false,
-                saveAsImage: false,
-                toggleTheme: false,
-              },
-            }}
-          />
-        </Suspense>
-      </div>
+    <div className="h-full w-full p-3 md:p-4">
+      <section className="playback-excalidraw relative h-full w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[linear-gradient(170deg,var(--panel-light),var(--panel-soft))] shadow-[var(--shadow-1)]">
+        <div className="pointer-events-none absolute right-3 top-3 z-10">
+          <span className="rounded-full border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs font-medium text-[var(--text-soft)]">
+            第 {pageIndex + 1} 页
+          </span>
+        </div>
+
+        {!hasSavedContent ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+            <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm text-[var(--text-soft)]">
+              主持人尚未在本页放置内容
+            </div>
+          </div>
+        ) : null}
+
+        <div className="h-full w-full">
+          <Suspense
+            fallback={
+              <div className="flex h-full w-full items-center justify-center text-sm text-[var(--text-soft)]">画布加载中...</div>
+            }
+          >
+            <ExcalidrawCanvas
+              key={sceneKey}
+              initialData={initialData}
+              viewModeEnabled={true}
+              zenModeEnabled={true}
+              gridModeEnabled={false}
+              validateEmbeddable={isSupportedEmbeddableUrl}
+              excalidrawAPI={(api) => {
+                excalidrawApiRef.current = api;
+                lockViewerScene(api, lockingSceneRef);
+              }}
+              onChange={(elements, appState) => {
+                lockViewerScene(excalidrawApiRef.current, lockingSceneRef, elements, appState);
+              }}
+              UIOptions={{
+                canvasActions: {
+                  changeViewBackgroundColor: false,
+                  clearCanvas: false,
+                  export: false,
+                  loadScene: false,
+                  saveToActiveFile: false,
+                  saveAsImage: false,
+                  toggleTheme: false,
+                },
+              }}
+            />
+          </Suspense>
+        </div>
+      </section>
     </div>
   );
 }

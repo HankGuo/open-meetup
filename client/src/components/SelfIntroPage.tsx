@@ -1,86 +1,135 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { BadgeInfo, CircleDot, UserRound, X } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
-import { X } from 'lucide-react';
 import { User } from '../types';
 
 export function SelfIntroPage() {
   const { participants, hostId } = useMeeting();
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-  const onlineParticipants = participants.filter((p) => p.online && p.userId !== hostId);
+  const members = useMemo(
+    () =>
+      participants
+        .filter((participant) => participant.userId !== hostId)
+        .sort((a, b) => a.joinedAt - b.joinedAt),
+    [hostId, participants],
+  );
+
+  const onlineCount = members.filter((member) => member.online).length;
 
   return (
-    <div className="flex flex-col items-center justify-center flex-1 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 p-8 overflow-hidden">
-      <div className="text-center mb-6 flex-shrink-0">
-        <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-3xl shadow-lg">
-          👋
-        </div>
-        <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
-          自我介绍环节
-        </h1>
-        <p className="text-base text-gray-600">
-          欢迎各位参与者，请开始自我介绍吧！
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 max-w-4xl">
-        {onlineParticipants.map((participant) => (
-          <div
-            key={participant.userId}
-            className="flex flex-col items-center p-3 bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow cursor-pointer"
-            onClick={() => setSelectedUser(participant)}
-          >
-            {participant.avatar ? (
-              <img
-                src={participant.avatar}
-                alt={participant.userName}
-                className="w-16 h-16 rounded-full object-cover border-2 border-indigo-100 mb-2"
-              />
-            ) : (
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xl font-bold border-2 border-indigo-100 mb-2">
-                {participant.userName?.charAt(0)?.toUpperCase() || '?'}
-              </div>
-            )}
-            <span className="text-sm font-medium text-gray-800 truncate max-w-full">
-              {participant.userName}
-            </span>
+    <div className="h-full w-full p-3 md:p-4">
+      <section className="relative flex h-full w-full flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[linear-gradient(170deg,var(--panel-light),var(--panel-soft))] shadow-[var(--shadow-1)]">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 md:px-5">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel-soft)] px-3 py-1 text-xs font-semibold text-[var(--text-soft)]">
+            <BadgeInfo className="h-3.5 w-3.5" />
+            名牌广场
           </div>
-        ))}
-      </div>
+          <div className="flex items-center gap-2 text-xs text-[var(--text-soft)]">
+            <span className="status-pill">
+              在线 {onlineCount}/{members.length}
+            </span>
+            <span className="status-pill">按加入时间排列</span>
+          </div>
+        </header>
+
+        {members.length === 0 ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+            <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)] px-6 py-5 text-center">
+              <p className="text-sm font-semibold text-[var(--text)]">暂无成员加入</p>
+              <p className="mt-1 text-sm text-[var(--text-soft)]">成员进入后会自动生成名牌并展示在这里。</p>
+            </div>
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+              {members.map((member) => (
+                <button
+                  key={member.userId}
+                  type="button"
+                  onClick={() => setSelectedUser(member)}
+                  className="group relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition hover:-translate-y-0.5 hover:border-[var(--primary)]/50 hover:bg-[var(--panel-light)]"
+                >
+                  <div className="absolute inset-x-0 top-0 h-8 bg-[linear-gradient(90deg,oklch(0.92_0.04_265_/0.75),oklch(0.9_0.04_208_/0.6))]" />
+
+                  <div className="relative mt-1 flex items-start justify-between gap-2">
+                    <Avatar participant={member} sizeClassName="h-12 w-12" />
+                    <span
+                      className={`status-pill px-2 py-0.5 text-[10px] ${
+                        member.online ? 'status-pill--online' : ''
+                      }`}
+                    >
+                      {member.online ? '在线' : '离线'}
+                    </span>
+                  </div>
+
+                  <div className="relative mt-3">
+                    <p className="truncate text-sm font-semibold text-[var(--text)]">{member.userName}</p>
+                    <p className="mt-1 text-xs text-[var(--text-soft)]">点击查看名牌详情</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       {selectedUser && (
         <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          className="dialog-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
           onClick={() => setSelectedUser(null)}
         >
-          <div className="bg-white rounded-2xl p-8 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-900">参与者信息</h3>
+          <div
+            className="dialog-panel w-full max-w-sm overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+                <UserRound className="h-4 w-4" />
+                成员名牌
+              </div>
               <button
+                type="button"
                 onClick={() => setSelectedUser(null)}
-                className="p-2 hover:bg-gray-100 rounded-full"
+                className="btn-base h-9 w-9 rounded-full border border-[var(--border)] bg-[var(--panel-light)] p-0 text-[var(--text)]"
               >
-                <X className="w-5 h-5 text-gray-500" />
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="flex flex-col items-center">
-              {selectedUser.avatar ? (
-                <img
-                  src={selectedUser.avatar}
-                  alt={selectedUser.userName}
-                  className="w-32 h-32 rounded-full object-cover border-4 border-indigo-100 mb-4"
-                />
-              ) : (
-                <div className="w-32 h-32 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-4xl font-bold border-4 border-indigo-100 mb-4">
-                  {selectedUser.userName?.charAt(0)?.toUpperCase() || '?'}
+            <div className="px-5 py-6">
+              <div className="mx-auto flex w-full max-w-[260px] flex-col items-center rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5 text-center">
+                <Avatar participant={selectedUser} sizeClassName="h-24 w-24" />
+                <h4 className="mt-4 text-xl font-semibold text-[var(--text)]">{selectedUser.userName}</h4>
+                <div className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-soft)]">
+                  <CircleDot className={`h-3 w-3 ${selectedUser.online ? 'text-[var(--primary)]' : 'text-[var(--text-soft)]'}`} />
+                  {selectedUser.online ? '当前在线' : '当前离线'}
                 </div>
-              )}
-              <h4 className="text-2xl font-bold text-gray-900 mb-2">{selectedUser.userName}</h4>
+              </div>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function Avatar({ participant, sizeClassName }: { participant: User; sizeClassName: string }) {
+  const fallback = participant.userName?.trim()?.charAt(0)?.toUpperCase() || '?';
+  if (participant.avatar) {
+    return (
+      <img
+        src={participant.avatar}
+        alt={participant.userName}
+        className={`${sizeClassName} rounded-full border border-[var(--border)] object-cover`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${sizeClassName} avatar-fallback text-lg font-semibold`}
+    >
+      {fallback}
     </div>
   );
 }

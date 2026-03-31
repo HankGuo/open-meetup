@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMeeting } from '../context/MeetingContext';
-import { Wifi, WifiOff, Upload, Ticket, User } from 'lucide-react';
+import { CheckCircle2, Ticket, Upload, User, Wifi, WifiOff } from 'lucide-react';
 import { STORAGE_KEYS } from '../context/storage';
 
 export function JoinPage() {
@@ -94,146 +94,141 @@ export function JoinPage() {
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">加入会议</h1>
-          {isConnected ? (
-            <span className="flex items-center text-green-600 text-sm">
-              <Wifi className="w-4 h-4 mr-1" /> Connected
-            </span>
-          ) : (
-            <span className="flex items-center text-red-600 text-sm">
-              <WifiOff className="w-4 h-4 mr-1" /> Disconnected
-            </span>
-          )}
-        </div>
+    <main className="page-enter flex h-full w-full items-center justify-center overflow-hidden px-4 py-6">
+      <section className="glass-panel w-full max-w-4xl p-4 md:p-7">
+        <div className="grid gap-6 md:grid-cols-[1.05fr_1fr]">
+          <div className="app-card p-5 md:p-6">
+            <h1 className="text-3xl font-bold text-[var(--text)]">加入会议</h1>
+            <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">
+              支持首次加入与 Ticket 快速回归两种模式，进入后将自动同步主持人的当前播放阶段。
+            </p>
 
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-            {error}
-          </div>
-        )}
-
-        <div className="flex mb-6 border rounded-lg overflow-hidden">
-          <button
-            className={`flex-1 py-2 text-sm font-medium flex items-center justify-center gap-2 ${
-              mode === 'form'
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-            onClick={() => setMode('form')}
-          >
-            <User className="w-4 h-4" />
-            首次加入
-          </button>
-          <button
-            className={`flex-1 py-2 text-sm font-medium flex items-center justify-center gap-2 ${
-              mode === 'ticket'
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-            onClick={() => setMode('ticket')}
-          >
-            <Ticket className="w-4 h-4" />
-            有Ticket
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          {mode === 'ticket' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Ticket编号 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono ${
-                    ticketError ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                  placeholder="例如: TKT-ABC12345"
-                  value={ticket}
-                  onChange={(e) => {
-                    setTicket(e.target.value.toUpperCase());
-                    setTicketError(null);
-                  }}
-                />
-                {ticketError && (
-                  <p className="mt-1 text-sm text-red-600">{ticketError}</p>
-                )}
-              </div>
-            </>
-          )}
-
-          {mode === 'form' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  昵称 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="请输入您的昵称"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  电子名片 <span className="text-red-500">*</span>
-                </label>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50">
-                    {previewUrl ? (
-                      <img src={previewUrl} alt="Avatar" className="w-full h-full object-cover" />
-                    ) : (
-                      <Upload className="w-8 h-8 text-gray-400" />
-                    )}
-                  </div>
-                  <label className="flex-1">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarChange}
-                      className="hidden"
-                    />
-                    <span className="inline-block w-full py-2 px-4 text-center text-sm text-indigo-600 border border-indigo-600 rounded-lg cursor-pointer hover:bg-indigo-50">
-                      上传头像
+            <div className="mt-5 grid gap-3">
+              <div className="app-card p-3">
+                <p className="text-xs text-[var(--text-soft)]">连接状态</p>
+                <div className="mt-1">
+                  {isConnected ? (
+                    <span className="status-pill status-pill--online">
+                      <Wifi className="h-3.5 w-3.5" /> 网络正常
                     </span>
-                  </label>
+                  ) : (
+                    <span className="status-pill status-pill--offline">
+                      <WifiOff className="h-3.5 w-3.5" /> 网络中断
+                    </span>
+                  )}
                 </div>
               </div>
-            </>
-          )}
+              <div className="app-card p-3">
+                <p className="text-xs text-[var(--text-soft)]">交互提示</p>
+                <p className="mt-1 text-sm text-[var(--text)]">首次加入会自动发放 Ticket，下次可直接凭 Ticket 登录。</p>
+              </div>
+            </div>
+          </div>
 
-          <button
-            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-            onClick={handleJoin}
-            disabled={loading || !isConnected || isReconnecting || verifying}
-          >
-            {loading || verifying ? (
-              <>
-                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                {verifying ? '验证中...' : '加入中...'}
-              </>
-            ) : (
-              '加入会议'
+          <div className="light-panel p-5 text-[var(--text-inverse)] md:p-6">
+            <div className="segmented-control mb-4">
+              <button
+                type="button"
+                className={`btn-base segmented-item text-sm ${
+                  mode === 'form' ? 'segmented-item--active' : ''
+                }`}
+                onClick={() => setMode('form')}
+              >
+                <User className="h-4 w-4" />
+                首次加入
+              </button>
+              <button
+                type="button"
+                className={`btn-base segmented-item text-sm ${
+                  mode === 'ticket' ? 'segmented-item--active' : ''
+                }`}
+                onClick={() => setMode('ticket')}
+              >
+                <Ticket className="h-4 w-4" />
+                有 Ticket
+              </button>
+            </div>
+
+            {error && (
+              <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
             )}
-          </button>
 
-          {mode === 'form' && (
-            <p className="text-center text-xs text-gray-500">
-              首次加入将自动分配Ticket，请妥善保管
-            </p>
-          )}
+            {mode === 'ticket' ? (
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">Ticket 编号</span>
+                  <input
+                    type="text"
+                    className={`app-input app-input-light mono ${ticketError ? '!border-rose-400' : ''}`}
+                    placeholder="例如: TKT-ABC12345"
+                    value={ticket}
+                    onChange={(e) => {
+                      setTicket(e.target.value.toUpperCase());
+                      setTicketError(null);
+                    }}
+                  />
+                </label>
+                {ticketError ? <p className="text-sm text-rose-600">{ticketError}</p> : null}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">昵称</span>
+                  <input
+                    type="text"
+                    className="app-input app-input-light"
+                    placeholder="请输入您的昵称"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                  />
+                </label>
+
+                <div>
+                  <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">电子名片</span>
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)]">
+                      {previewUrl ? (
+                        <img src={previewUrl} alt="Avatar" className="h-full w-full object-cover" />
+                      ) : (
+                        <Upload className="h-7 w-7 text-[var(--text-soft)]" />
+                      )}
+                    </div>
+                    <label className="min-w-0 flex-1">
+                      <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
+                      <span className="btn-base btn-secondary w-full cursor-pointer">
+                        上传头像
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              className="btn-base btn-primary mt-5 w-full disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={handleJoin}
+              disabled={loading || !isConnected || isReconnecting || verifying}
+            >
+              {loading || verifying ? (
+                <>
+                  <svg className="h-5 w-5 animate-spin text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4zm2 5.3A8 8 0 014 12H0c0 3.1 1.1 5.9 3 8l3-2.7z"></path>
+                  </svg>
+                  {verifying ? '验证中...' : '加入中...'}
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  加入会议
+                </>
+              )}
+            </button>
+
+            {mode === 'form' ? <p className="mt-3 text-center text-xs text-[var(--text-soft)]">首次加入将自动分配 Ticket，请妥善保管</p> : null}
+          </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

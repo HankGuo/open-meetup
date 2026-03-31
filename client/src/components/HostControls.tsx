@@ -9,29 +9,33 @@ export function HostControls() {
   const canGoNext = currentStep < totalPages - 1;
 
   return (
-    <div className="fixed bottom-8 left-1/2 z-40 flex -translate-x-1/2 items-center gap-4 rounded-full bg-white/90 px-6 py-3 shadow-lg backdrop-blur-sm">
+    <div className="control-surface fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 px-1.5 py-1">
       <button
+        type="button"
         onClick={() => prevStep()}
         disabled={!canGoPrev || !isConnected}
-        className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 rounded-full text-gray-700 font-medium transition-colors"
+        aria-label="上一页"
+        title="上一页"
+        className="btn-base btn-compact control-btn h-8 w-8 rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-45"
       >
-        <ChevronLeft className="w-5 h-5" />
-        上一页
+        <ChevronLeft className="h-3.5 w-3.5" />
       </button>
 
-      <div className="flex items-center gap-2">
-        <span className="text-lg font-bold text-gray-800">{currentStep + 1}</span>
-        <span className="text-gray-400">/</span>
-        <span className="text-lg text-gray-500">{totalPages}</span>
+      <div className="control-counter px-2 py-1 text-[11px]">
+        <span className="font-semibold text-[var(--text)]">{currentStep + 1}</span>
+        <span className="px-1 text-[var(--text-soft)]">/</span>
+        <span>{totalPages}</span>
       </div>
 
       <button
+        type="button"
         onClick={() => nextStep()}
         disabled={!canGoNext || !isConnected}
-        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-50 disabled:text-gray-400 text-white rounded-full font-medium transition-colors"
+        aria-label="下一页"
+        title="下一页"
+        className="btn-base btn-compact control-btn control-btn--primary h-8 w-8 rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-45"
       >
-        下一页
-        <ChevronRight className="w-5 h-5" />
+        <ChevronRight className="h-3.5 w-3.5" />
       </button>
     </div>
   );
