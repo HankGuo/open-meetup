@@ -6,12 +6,6 @@ import { User } from '../types';
 
 const INLINE_PREVIEW_LIMIT = 4;
 const MENU_LIMIT = 10;
-const MEDAL_TEXT = ['金', '银', '铜'];
-const MEDAL_STYLE = [
-  'bg-amber-300 text-amber-950 border-amber-200',
-  'bg-slate-300 text-slate-900 border-slate-200',
-  'bg-orange-300 text-orange-950 border-orange-200',
-];
 
 interface ParticipantRosterBarProps {
   topActions?: ReactNode;
@@ -78,14 +72,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
     return preview.slice(0, INLINE_PREVIEW_LIMIT);
   }, [host, me, others]);
 
-  const otherRankMap = useMemo(() => {
-    const rankMap = new Map<string, number>();
-    others.forEach((participant, index) => {
-      rankMap.set(participant.userId, index + 1);
-    });
-    return rankMap;
-  }, [others]);
-
   return (
     <>
       <div className="pointer-events-none absolute inset-x-0 top-2 z-30 px-3 md:px-4">
@@ -143,7 +129,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                     {menuMembers.map((participant, index) => {
                       const isHost = participant.userId === hostId;
                       const isMe = participant.userId === myUserId;
-                      const rank = otherRankMap.get(participant.userId) ?? null;
                       return (
                         <div
                           key={participant.userId}
@@ -160,7 +145,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                               <span>{participant.online ? '在线' : '离线'}</span>
                             </div>
                           </div>
-                          {rank && rank <= 3 ? <Medal rank={rank} /> : null}
                         </div>
                       );
                     })}
@@ -205,7 +189,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
               {sortedParticipants.map((participant, index) => {
                 const isHost = participant.userId === hostId;
                 const isMe = participant.userId === myUserId;
-                const rank = otherRankMap.get(participant.userId) ?? null;
 
                 return (
                   <div key={participant.userId} className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0">
@@ -235,7 +218,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                         </span>
                       </div>
                     </div>
-                    {rank && rank <= 3 ? <Medal rank={rank} /> : null}
                   </div>
                 );
               })}
@@ -244,19 +226,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
         </div>
       ) : null}
     </>
-  );
-}
-
-function Medal({ rank }: { rank: number }) {
-  const text = MEDAL_TEXT[rank - 1];
-  const style = MEDAL_STYLE[rank - 1];
-  return (
-    <span
-      className={`inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-bold shadow-sm ${style}`}
-      title={`第 ${rank} 位加入`}
-    >
-      {text}
-    </span>
   );
 }
 

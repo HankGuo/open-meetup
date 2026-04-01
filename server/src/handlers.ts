@@ -300,16 +300,14 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      const result = roomManager.endMeeting(identity);
+      const result = roomManager.forceEndRoom(identity);
       if (!result.success) {
         ack(callback, result);
         return;
       }
 
-      io.emit('control:ended', {
-        status: result.data.status,
-      });
-      broadcastRoomState(io, roomManager);
+      clearSocketIdentity(socket);
+      io.emit('room:closed', { reason: 'HOST_ENDED' });
       ack(callback, { success: true, data: null });
     });
 

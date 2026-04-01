@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BadgeInfo, CircleDot, UserRound, X } from 'lucide-react';
+import { BadgeInfo, CircleDot, Crown, UserRound, X } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { User } from '../types';
 
@@ -43,32 +43,36 @@ export function SelfIntroPage() {
         ) : (
           <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-5">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
-              {members.map((member) => (
-                <button
-                  key={member.userId}
-                  type="button"
-                  onClick={() => setSelectedUser(member)}
-                  className="group relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition hover:-translate-y-0.5 hover:border-[var(--primary)]/50 hover:bg-[var(--panel-light)]"
-                >
-                  <div className="absolute inset-x-0 top-0 h-8 bg-[linear-gradient(90deg,oklch(0.92_0.04_265_/0.75),oklch(0.9_0.04_208_/0.6))]" />
+              {members.map((member, index) => {
+                const rank = index + 1;
+                return (
+                  <button
+                    key={member.userId}
+                    type="button"
+                    onClick={() => setSelectedUser(member)}
+                    className="group relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition hover:-translate-y-0.5 hover:border-[var(--primary)]/50 hover:bg-[var(--panel-light)]"
+                  >
+                    <div className="absolute inset-x-0 top-0 h-8 bg-[linear-gradient(90deg,oklch(0.92_0.04_265_/0.75),oklch(0.9_0.04_208_/0.6))]" />
+                    {rank <= 3 ? <RankCrown rank={rank as 1 | 2 | 3} /> : null}
 
-                  <div className="relative mt-1 flex items-start justify-between gap-2">
-                    <Avatar participant={member} sizeClassName="h-12 w-12" />
-                    <span
-                      className={`status-pill px-2 py-0.5 text-[10px] ${
-                        member.online ? 'status-pill--online' : ''
-                      }`}
-                    >
-                      {member.online ? '在线' : '离线'}
-                    </span>
-                  </div>
+                    <div className="relative mt-1 flex items-start justify-between gap-2">
+                      <Avatar participant={member} sizeClassName="h-12 w-12" />
+                      <span
+                        className={`status-pill px-2 py-0.5 text-[10px] ${
+                          member.online ? 'status-pill--online' : ''
+                        }`}
+                      >
+                        {member.online ? '在线' : '离线'}
+                      </span>
+                    </div>
 
-                  <div className="relative mt-3">
-                    <p className="truncate text-sm font-semibold text-[var(--text)]">{member.userName}</p>
-                    <p className="mt-1 text-xs text-[var(--text-soft)]">点击查看名牌详情</p>
-                  </div>
-                </button>
-              ))}
+                    <div className="relative mt-3">
+                      <p className="truncate text-sm font-semibold text-[var(--text)]">{member.userName}</p>
+                      <p className="mt-1 text-xs text-[var(--text-soft)]">点击查看名牌详情</p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -111,6 +115,26 @@ export function SelfIntroPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function RankCrown({ rank }: { rank: 1 | 2 | 3 }) {
+  const label = rank === 1 ? '金' : rank === 2 ? '银' : '铜';
+  const style =
+    rank === 1
+      ? 'border-amber-300 bg-amber-100/95 text-amber-700'
+      : rank === 2
+        ? 'border-slate-300 bg-slate-100/95 text-slate-700'
+        : 'border-orange-300 bg-orange-100/95 text-orange-700';
+
+  return (
+    <span
+      className={`absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold shadow-sm ${style}`}
+      title={`第 ${rank} 位加入`}
+    >
+      <Crown className="h-3 w-3" />
+      {label}
+    </span>
   );
 }
 

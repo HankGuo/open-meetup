@@ -125,6 +125,33 @@ test('host can return from live to setup and keep current page index', () => {
   assert.equal(returned.data.currentStep, 2);
 });
 
+test('forceEndRoom should close room immediately and prevent host handover', () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const ended = manager.forceEndRoom(hostIdentity);
+  assert.equal(ended.success, true);
+  assert.equal(ended.data.closed, true);
+  assert.equal(manager.getActiveRoom(), null);
+
+  const participantState = manager.getStateByIdentity(participantIdentity);
+  assert.equal(participantState.success, false);
+  assert.equal(participantState.error.code, 'NOT_AUTHENTICATED');
+
+  const joinAfterEnd = manager.joinRoom('Bob', 'socket-b');
+  assert.equal(joinAfterEnd.success, false);
+  assert.equal(joinAfterEnd.error.code, 'ROOM_NOT_FOUND');
+});
+
 test('setup phase should allow removing all pages', () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
@@ -158,6 +185,25 @@ test('ticket join should restore existing participant instead of creating duplic
   const room = manager.getActiveRoom();
   assert.ok(room);
   assert.equal(room.participants.size, 2);
+});
+
+test('host ticket should restore host identity', () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+
+  const hostIdentity = getHostIdentity(created);
+  const hostTicket = created.data.ticket;
+  assert.ok(hostTicket);
+  assert.equal(hostTicket.startsWith('HOST-'), true);
+
+  const disconnected = manager.onSocketDisconnected('socket-host');
+  assert.ok(disconnected);
+
+  const rejoined = manager.joinRoom('', 'socket-host-2', undefined, hostTicket);
+  assert.equal(rejoined.success, true);
+  assert.equal(rejoined.data.userId, hostIdentity.userId);
+  assert.equal(rejoined.data.userRole, 'host');
 });
 
 test('invalid ticket should be rejected', () => {

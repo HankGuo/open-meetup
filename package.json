@@ -14,7 +14,8 @@
     "dev:stop": "bash ./scripts/dev-stop.sh",
     "test": "npm run build && node --test server/test/*.test.js",
     "build": "cd server && npm run build && cd ../client && npm run build",
-    "install:all": "npm install && cd server && npm install && cd ../client && npm install"
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "sim:bulk-join": "node scripts/bulk-join-simulator/simulate-bulk-join.cjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

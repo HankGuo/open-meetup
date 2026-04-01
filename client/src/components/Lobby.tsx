@@ -87,6 +87,9 @@ export function Lobby() {
                 <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">您的姓名</span>
                 <input
                   type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   className="app-input app-input-light"
                   placeholder="请输入姓名"
                   value={userName}
@@ -98,6 +101,9 @@ export function Lobby() {
                 <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">房间标题</span>
                 <input
                   type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   className="app-input app-input-light"
                   placeholder="请输入房间标题"
                   value={title}
@@ -109,6 +115,9 @@ export function Lobby() {
                 <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">授权口令</span>
                 <input
                   type="password"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck={false}
                   className="app-input app-input-light mono"
                   placeholder="请输入授权口令"
                   value={password}

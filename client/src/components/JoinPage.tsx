@@ -1,7 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useMeeting } from '../context/MeetingContext';
 import { CheckCircle2, Ticket, Upload, User, Wifi, WifiOff } from 'lucide-react';
 import { STORAGE_KEYS } from '../context/storage';
+
+interface TicketIdentity {
+  role: 'host' | 'participant';
+  userName: string;
+  userId: string;
+}
+
+interface TicketCheckResult {
+  valid: boolean;
+  error?: string;
+  identity?: TicketIdentity;
+}
 
 export function JoinPage() {
   const { joinRoom, isConnected, isReconnecting, error, clearError } = useMeeting();
@@ -13,26 +25,35 @@ export function JoinPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [autoJoinTicket, setAutoJoinTicket] = useState('');
 
   useEffect(() => {
-    const storedAvatar = localStorage.getItem(STORAGE_KEYS.avatar);
-    if (storedAvatar) {
-      setAvatar(storedAvatar);
-      setPreviewUrl(storedAvatar);
-    }
-    const storedTicket = localStorage.getItem(STORAGE_KEYS.ticket);
-    if (storedTicket) {
-      setTicket(storedTicket);
+    try {
+      const storedTicket = localStorage.getItem(STORAGE_KEYS.ticket)?.trim().toUpperCase() || '';
+      if (!storedTicket) {
+        return;
+      }
       setMode('ticket');
+      setTicket(storedTicket);
+      setAutoJoinTicket(storedTicket);
+    } catch {
+      // 忽略存储失败
     }
   }, []);
 
-  async function verifyTicket(ticketToVerify: string): Promise<{ valid: boolean; error?: string }> {
+  async function verifyTicket(ticketToVerify: string): Promise<TicketCheckResult> {
     try {
       const response = await fetch(
         `${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/ticket-check?ticket=${encodeURIComponent(ticketToVerify)}`
       );
-      const data = await response.json();
+      if (!response.ok) {
+        const failed = (await response.json()) as TicketCheckResult;
+        return {
+          valid: false,
+          error: failed.error || '验证失败，请稍后重试',
+        };
+      }
+      const data = (await response.json()) as TicketCheckResult;
       return data;
     } catch {
       return { valid: false, error: '验证失败，请稍后重试' };
@@ -47,49 +68,81 @@ export function JoinPage() {
         const dataUrl = event.target?.result as string;
         setAvatar(dataUrl);
         setPreviewUrl(dataUrl);
-        localStorage.setItem(STORAGE_KEYS.avatar, dataUrl);
       };
       reader.readAsDataURL(file);
     }
   }
 
+  async function joinWithTicket(ticketInput: string) {
+    const normalizedTicket = ticketInput.trim().toUpperCase();
+    if (!normalizedTicket) {
+      setTicketError('请输入您的Ticket');
+      return false;
+    }
+
+    clearError();
+    setTicketError(null);
+    setVerifying(true);
+    const verifyResult = await verifyTicket(normalizedTicket);
+    setVerifying(false);
+
+    if (!verifyResult.valid || !verifyResult.identity) {
+      setTicketError(verifyResult.error || 'Ticket无效');
+      try {
+        const storedTicket = localStorage.getItem(STORAGE_KEYS.ticket)?.trim().toUpperCase() || '';
+        if (storedTicket === normalizedTicket) {
+          localStorage.removeItem(STORAGE_KEYS.ticket);
+        }
+      } catch {
+        // 忽略存储失败
+      }
+      return false;
+    }
+
+    setLoading(true);
+    const success = await joinRoom('', normalizedTicket, undefined);
+    setLoading(false);
+    return success;
+  }
+
+  useEffect(() => {
+    if (!autoJoinTicket || !isConnected || isReconnecting) {
+      return;
+    }
+
+    const ticketToJoin = autoJoinTicket;
+    setAutoJoinTicket('');
+    void (async () => {
+      const success = await joinWithTicket(ticketToJoin);
+      if (!success) {
+        setMode('ticket');
+        setTicket(ticketToJoin);
+      }
+    })();
+  }, [autoJoinTicket, isConnected, isReconnecting]);
+
   async function handleJoin() {
+    if (mode === 'ticket') {
+      await joinWithTicket(ticket);
+      return;
+    }
+
     clearError();
     setTicketError(null);
 
-    if (mode === 'ticket') {
-      if (!ticket.trim()) {
-        alert('请输入您的Ticket');
-        return;
-      }
-      setVerifying(true);
-      const verifyResult = await verifyTicket(ticket.trim());
-      setVerifying(false);
-      if (!verifyResult.valid) {
-        setTicketError(verifyResult.error || 'Ticket无效');
-        return;
-      }
-      setLoading(true);
-      const success = await joinRoom('', ticket.trim(), undefined);
-      setLoading(false);
-      if (!success) {
-        // Error is already set in context
-      }
-    } else {
-      if (!userName.trim()) {
-        alert('请输入您的昵称');
-        return;
-      }
-      if (!previewUrl) {
-        alert('请上传您的电子名片');
-        return;
-      }
-      setLoading(true);
-      const success = await joinRoom(userName.trim(), undefined, avatar);
-      setLoading(false);
-      if (!success) {
-        // Error is already set in context
-      }
+    if (!userName.trim()) {
+      alert('请输入您的昵称');
+      return;
+    }
+    if (!previewUrl) {
+      alert('请上传您的电子名片');
+      return;
+    }
+    setLoading(true);
+    const success = await joinRoom(userName.trim(), undefined, avatar);
+    setLoading(false);
+    if (!success) {
+      // Error is already set in context
     }
   }
 
@@ -100,7 +153,7 @@ export function JoinPage() {
           <div className="app-card p-5 md:p-6">
             <h1 className="text-3xl font-bold text-[var(--text)]">加入会议</h1>
             <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">
-              支持首次加入与 Ticket 快速回归两种模式，进入后将自动同步主持人的当前播放阶段。
+              支持首次加入与 Ticket 两种模式；Ticket 与身份绑定，更换浏览器或使用隐私模式时可继续使用。
             </p>
 
             <div className="mt-5 grid gap-3">
@@ -120,7 +173,7 @@ export function JoinPage() {
               </div>
               <div className="app-card p-3">
                 <p className="text-xs text-[var(--text-soft)]">交互提示</p>
-                <p className="mt-1 text-sm text-[var(--text)]">首次加入会自动发放 Ticket，下次可直接凭 Ticket 登录。</p>
+                <p className="mt-1 text-sm text-[var(--text)]">输入或读取本地 Ticket 时都会先向服务端校验有效性和绑定身份，再执行加入。</p>
               </div>
             </div>
           </div>
@@ -159,8 +212,11 @@ export function JoinPage() {
                   <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">Ticket 编号</span>
                   <input
                     type="text"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     className={`app-input app-input-light mono ${ticketError ? '!border-rose-400' : ''}`}
-                    placeholder="例如: TKT-ABC12345"
+                    placeholder="例如: TKT-ABC12345 / HOST-ABC12345"
                     value={ticket}
                     onChange={(e) => {
                       setTicket(e.target.value.toUpperCase());
@@ -176,6 +232,9 @@ export function JoinPage() {
                   <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">昵称</span>
                   <input
                     type="text"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     className="app-input app-input-light"
                     placeholder="请输入您的昵称"
                     value={userName}
@@ -225,7 +284,7 @@ export function JoinPage() {
               )}
             </button>
 
-            {mode === 'form' ? <p className="mt-3 text-center text-xs text-[var(--text-soft)]">首次加入将自动分配 Ticket，请妥善保管</p> : null}
+            {mode === 'form' ? <p className="mt-3 text-center text-xs text-[var(--text-soft)]">首次加入将自动分配 Ticket，更换浏览器或使用隐私模式时会用到</p> : null}
           </div>
         </div>
       </section>

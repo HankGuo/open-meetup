@@ -159,7 +159,14 @@ app.get('/api/room/ticket-check', (req, res) => {
   const normalizedTicket = ticket.trim().toUpperCase();
   for (const participant of room.participants.values()) {
     if (participant.ticket?.toUpperCase() === normalizedTicket) {
-      res.json({ valid: true });
+      res.json({
+        valid: true,
+        identity: {
+          role: participant.role,
+          userName: participant.userName,
+          userId: participant.userId,
+        },
+      });
       return;
     }
   }

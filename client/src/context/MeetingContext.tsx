@@ -10,7 +10,7 @@ import {
   User,
   UserRole,
 } from '../types';
-import { STORAGE_KEYS, clearStoredSession, loadStoredSession, saveStoredSession } from './storage';
+import { STORAGE_KEYS, clearAllLocalStorage } from './storage';
 import { createDefaultMeetingPages } from '../meetingConfig';
 
 const MeetingContext = createContext<MeetingContextType | null>(null);
@@ -62,17 +62,16 @@ interface StateSyncEvent {
 }
 
 export function MeetingProvider({ children }: MeetingProviderProps) {
-  const storedSessionRef = useRef<SessionCredentials | null>(loadStoredSession());
-  const sessionRef = useRef<SessionCredentials | null>(storedSessionRef.current);
+  const sessionRef = useRef<SessionCredentials | null>(null);
   const reconnectingRef = useRef(false);
 
   const socket = useMemo(() => initSocket(), []);
 
-  const [myUserId, setMyUserId] = useState(storedSessionRef.current?.userId ?? '');
+  const [myUserId, setMyUserId] = useState('');
   const [myRole, setMyRole] = useState<UserRole>('participant');
   const [myName, setMyName] = useState('');
   const [myTicket, setMyTicket] = useState('');
-  const [sessionId, setSessionId] = useState(storedSessionRef.current?.sessionId ?? '');
+  const [sessionId, setSessionId] = useState('');
   const [title, setTitle] = useState('');
   const [participants, setParticipants] = useState<User[]>([]);
   const [hostId, setHostId] = useState('');
@@ -81,7 +80,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [pages, setPages] = useState<MeetingPageDefinition[]>(createDefaultMeetingPages);
   const [isConnected, setIsConnected] = useState(socket.connected);
-  const [isReconnecting, setIsReconnecting] = useState(Boolean(storedSessionRef.current));
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pageContents, setPageContents] = useState<Map<string, PageContent>>(new Map());
 
@@ -103,15 +102,14 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
   const clearSession = useCallback(() => {
     sessionRef.current = null;
-    clearStoredSession();
     setMyUserId('');
     setSessionId('');
-    localStorage.removeItem(STORAGE_KEYS.isHost);
+    setMyTicket('');
+    setIsReconnecting(false);
   }, []);
 
   const persistSession = useCallback((credentials: SessionCredentials) => {
     sessionRef.current = credentials;
-    saveStoredSession(credentials);
     setMyUserId(credentials.userId);
     setSessionId(credentials.sessionId);
   }, []);
@@ -151,6 +149,10 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       if (code === 'ROOM_NOT_FOUND' || code === 'SESSION_EXPIRED' || code === 'USER_NOT_FOUND' || code === 'ROOM_CLOSED' || code === 'BAD_REQUEST') {
         clearSession();
         resetRoomState();
+      }
+      if (code === 'ROOM_NOT_FOUND') {
+        setError(null);
+        return;
       }
       setError(errorData?.message || 'Reconnection failed');
     },
@@ -222,7 +224,9 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       }
 
       applySyncData(response.data);
-      localStorage.setItem(STORAGE_KEYS.isHost, 'true');
+      if (response.data.ticket) {
+        localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
+      }
       return true;
     },
     [applySyncData, handleSocketFailure, isConnected, safeEmit],
@@ -260,12 +264,14 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   const leaveRoom = useCallback(async (): Promise<boolean> => {
     const session = sessionRef.current;
     if (!session) {
+      clearAllLocalStorage();
       resetRoomState();
       clearSession();
       return true;
     }
 
     if (!isConnected) {
+      clearAllLocalStorage();
       resetRoomState();
       clearSession();
       return true;
@@ -286,6 +292,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       setError(null);
     }
 
+    clearAllLocalStorage();
     resetRoomState();
     clearSession();
     return true;
@@ -294,12 +301,14 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   const endRoom = useCallback(async (): Promise<boolean> => {
     const session = sessionRef.current;
     if (!session) {
+      clearAllLocalStorage();
       resetRoomState();
       clearSession();
       return true;
     }
 
     if (!isConnected) {
+      clearAllLocalStorage();
       resetRoomState();
       clearSession();
       return true;
@@ -314,6 +323,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       return false;
     }
 
+    clearAllLocalStorage();
     resetRoomState();
     clearSession();
     return true;
@@ -376,6 +386,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       handleSocketFailure(response.error, '结束会议失败');
       return false;
     }
+    clearAllLocalStorage();
     return true;
   }, [handleSocketFailure, safeEmit]);
 
@@ -480,11 +491,15 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       setCurrentStep(data.currentStep);
     };
 
-    const onMeetingEnded = (data: { status: MeetingStatus }) => {
-      setStatus(data.status);
+    const onMeetingEnded = (_data: { status: MeetingStatus }) => {
+      clearAllLocalStorage();
+      resetRoomState();
+      clearSession();
+      setError(mapRoomClosedReason('HOST_ENDED'));
     };
 
     const onRoomClosed = (data: { reason: string }) => {
+      clearAllLocalStorage();
       resetRoomState();
       clearSession();
       setError(mapRoomClosedReason(data.reason));

@@ -168,7 +168,7 @@ export class RoomManager {
 
     if (requestedTicket) {
       const participant = this.findParticipantByTicket(room, requestedTicket);
-      if (!participant || participant.role !== 'participant') {
+      if (!participant) {
         return this.fail('Invalid ticket', 'INVALID_TICKET');
       }
 
