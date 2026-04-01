@@ -6,6 +6,8 @@ import {
   MeetingPageKind,
   MeetingPageTheme,
   MeetingPhase,
+  ParticipantWorks,
+  PageSubmissionMode,
   PageContent,
   PublicParticipant,
   Room,
@@ -15,19 +17,23 @@ import {
   SocketIdentity,
   SocketResult,
 } from './types';
-import { HOST_PASSWORD } from './config';
+import {
+  DEFAULT_PARTICIPANTS_PER_ROOM,
+  HOST_PASSWORD,
+  ROOM_PARTICIPANT_LIMIT_MAX,
+  ROOM_PARTICIPANT_LIMIT_MIN,
+} from './config';
 import { MemoryStore, RoomStore } from './store';
 import { createDefaultMeetingPages, MAX_MEETING_PAGES } from './meetingConfig';
 
-const MAX_PARTICIPANTS_PER_ROOM = 50;
 const DISCONNECT_GRACE_MS = 120_000;
 const PARTICIPANT_TICKET_PREFIX = 'TKT-';
 const PARTICIPANT_TICKET_RANDOM_LENGTH = 8;
-const MAX_WORK_URL_LENGTH = 500;
+const MAX_WORK_URL_LENGTH = 2_000_000;
 const MAX_WORK_DESCRIPTION_LENGTH = 120;
 const MAX_PAGE_TITLE_LENGTH = 64;
 
-type AuthContext = { room: Room; participant: RoomParticipant; identity: SocketIdentity };
+type AuthContext = { room: Room; participant: RoomParticipant };
 
 type RoomOperationResult = SocketResult<{
   status: MeetingStatus;
@@ -83,7 +89,7 @@ export class RoomManager {
     title: string,
     password: string,
     socketId: string,
-    avatar?: string,
+    participantLimitInput?: unknown,
   ): SocketResult<RoomStateSync> {
     const existingRoom = this.getActiveRoom();
     if (existingRoom) {
@@ -97,6 +103,13 @@ export class RoomManager {
     }
     if (!roomTitle) {
       return this.fail('Title is required', 'BAD_REQUEST');
+    }
+    const participantLimit = sanitizeParticipantLimit(participantLimitInput);
+    if (participantLimit == null) {
+      return this.fail(
+        `Participant limit must be between ${ROOM_PARTICIPANT_LIMIT_MIN} and ${ROOM_PARTICIPANT_LIMIT_MAX}`,
+        'BAD_REQUEST',
+      );
     }
 
     if (password !== HOST_PASSWORD) {
@@ -115,12 +128,12 @@ export class RoomManager {
       socketId,
       online: true,
       lastSeenAt: now,
-      avatar,
       ticket: 'HOST-' + randomUUID().substring(0, 8).toUpperCase(),
     };
 
     const activeRoom: Room = {
       title: roomTitle,
+      participantLimit,
       hostId: host.userId,
       participants: new Map([[host.userId, host]]),
       status: 'active',
@@ -148,7 +161,6 @@ export class RoomManager {
   joinRoom(
     userNameInput: string,
     socketId: string,
-    avatar?: string,
     ticket?: string,
   ): SocketResult<RoomStateSync> {
     const room = this.getActiveRoom();
@@ -180,9 +192,6 @@ export class RoomManager {
       participant.socketId = socketId;
       participant.online = true;
       participant.lastSeenAt = now;
-      if (avatar && avatar.trim()) {
-        participant.avatar = avatar;
-      }
       room.updatedAt = now;
 
       this.socketToIdentity.set(socketId, {
@@ -202,7 +211,7 @@ export class RoomManager {
     if (!userName) {
       return this.fail('Invalid user name', 'BAD_REQUEST');
     }
-    if (room.participants.size >= MAX_PARTICIPANTS_PER_ROOM) {
+    if (getParticipantAudienceCount(room) >= room.participantLimit) {
       return this.fail('Room is full', 'ROOM_FULL');
     }
 
@@ -216,7 +225,6 @@ export class RoomManager {
       socketId,
       online: true,
       lastSeenAt: now,
-      avatar,
       ticket: this.generateParticipantTicket(room),
     };
 
@@ -379,7 +387,7 @@ export class RoomManager {
       return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
     }
     if (auth.room.status !== 'active') {
-      return this.fail('Meeting is not active', 'MEETING_NOT_ACTIVE');
+      return this.fail('Room is not active', 'ROOM_NOT_ACTIVE');
     }
     if (auth.room.pages.length === 0) {
       return this.fail('至少保留一个页面后再开始', 'BAD_REQUEST');
@@ -405,7 +413,7 @@ export class RoomManager {
       return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
     }
     if (auth.room.status !== 'active') {
-      return this.fail('Meeting is not active', 'MEETING_NOT_ACTIVE');
+      return this.fail('Room is not active', 'ROOM_NOT_ACTIVE');
     }
 
     auth.room.phase = 'setup';
@@ -419,44 +427,6 @@ export class RoomManager {
     return {
       success: true,
       data: this.buildPublicRoomSnapshot(auth.room),
-    };
-  }
-
-  endMeeting(identity: SocketIdentity): RoomOperationResult {
-    const auth = this.authorize(identity);
-    if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
-    }
-    if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
-    }
-
-    auth.room.status = 'ended';
-    auth.room.updatedAt = Date.now();
-    this.store.saveRoom(auth.room);
-
-    return {
-      success: true,
-      data: this.buildPublicRoomSnapshot(auth.room),
-    };
-  }
-
-  validateHostIdentity(identity: SocketIdentity): SocketResult<null> {
-    if (!identity.userId || !identity.sessionId) {
-      return this.fail('Missing identity', 'BAD_REQUEST');
-    }
-
-    const auth = this.authorize(identity);
-    if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
-    }
-    if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
-    }
-
-    return {
-      success: true,
-      data: null,
     };
   }
 
@@ -527,6 +497,30 @@ export class RoomManager {
       }
     }
 
+    const validShowcaseIds = new Set(
+      normalizedPages.filter((page) => page.kind === 'showcase').map((page) => page.id),
+    );
+    const showcaseModeByPageId = new Map(
+      normalizedPages
+        .filter((page) => page.kind === 'showcase')
+        .map((page) => [page.id, page.submissionMode ?? 'url'] as const),
+    );
+    for (const participant of auth.room.participants.values()) {
+      if (!participant.works) {
+        continue;
+      }
+      for (const submissionPageId of Object.keys(participant.works)) {
+        const submission = participant.works[submissionPageId];
+        const mode = showcaseModeByPageId.get(submissionPageId);
+        if (!validShowcaseIds.has(submissionPageId) || !mode || !isValidSubmissionForMode(submission, mode)) {
+          delete participant.works[submissionPageId];
+        }
+      }
+      if (Object.keys(participant.works).length === 0) {
+        delete participant.works;
+      }
+    }
+
     const maxStepIndex = Math.max(0, normalizedPages.length - 1);
     if (auth.room.currentStep > maxStepIndex) {
       auth.room.currentStep = maxStepIndex;
@@ -558,7 +552,7 @@ export class RoomManager {
     };
   }
 
-  submitWork(identity: SocketIdentity, workUrlInput: string, workDescriptionInput: string): WorkSubmitResult {
+  submitWork(identity: SocketIdentity, pageIdInput: string, workUrlInput: string, workDescriptionInput: string): WorkSubmitResult {
     const auth = this.authorize(identity);
     if (!auth) {
       return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
@@ -567,9 +561,23 @@ export class RoomManager {
       return this.fail('Only participant can submit work', 'NOT_AUTHORIZED');
     }
 
-    const workUrl = sanitizeWorkUrl(workUrlInput);
+    const pageId = sanitizePageId(pageIdInput);
+    if (!pageId) {
+      return this.fail('页面 ID 无效', 'BAD_REQUEST');
+    }
+
+    const targetPage = auth.room.pages.find((page) => page.id === pageId);
+    if (!targetPage || targetPage.kind !== 'showcase') {
+      return this.fail('当前页面不支持提交内容', 'BAD_REQUEST');
+    }
+
+    const submissionMode = targetPage.submissionMode ?? 'url';
+    const workUrl = submissionMode === 'image' ? sanitizeImageWorkUrl(workUrlInput) : sanitizeHttpWorkUrl(workUrlInput);
     if (!workUrl) {
-      return this.fail('请填写有效的 http/https 作品链接', 'BAD_REQUEST');
+      return this.fail(
+        submissionMode === 'image' ? '请上传有效图片后再提交' : '请填写有效的 http/https 作品链接',
+        'BAD_REQUEST',
+      );
     }
 
     const workDescription = sanitizeWorkDescription(workDescriptionInput);
@@ -578,9 +586,12 @@ export class RoomManager {
     }
 
     const now = Date.now();
-    auth.participant.workUrl = workUrl;
-    auth.participant.workDescription = workDescription;
-    auth.participant.workUpdatedAt = now;
+    auth.participant.works = auth.participant.works ?? {};
+    auth.participant.works[pageId] = {
+      url: workUrl,
+      description: workDescription,
+      updatedAt: now,
+    };
     auth.room.updatedAt = now;
     this.store.saveRoom(auth.room);
 
@@ -702,7 +713,7 @@ export class RoomManager {
     if (participant.sessionId !== identity.sessionId) {
       return null;
     }
-    return { room, participant, identity };
+    return { room, participant };
   }
 
   private closeRoom(): void {
@@ -801,13 +812,8 @@ export class RoomManager {
       pages: room.pages,
       userId: me.userId,
       userRole: me.role,
-      userName: me.userName,
       sessionId: me.sessionId,
-      avatar: me.avatar,
       ticket: me.ticket,
-      workUrl: me.workUrl,
-      workDescription: me.workDescription,
-      workUpdatedAt: me.workUpdatedAt,
     };
 
     if (room.pageContents.size > 0) {
@@ -836,11 +842,8 @@ export class RoomManager {
       joinedAt: participant.joinedAt,
       online: participant.online,
       lastSeenAt: participant.lastSeenAt,
-      avatar: participant.avatar,
       ticket: participant.ticket,
-      workUrl: participant.workUrl,
-      workDescription: participant.workDescription,
-      workUpdatedAt: participant.workUpdatedAt,
+      works: cloneParticipantWorks(participant.works),
     };
   }
 
@@ -871,6 +874,30 @@ function sanitizeTitle(title: string): string {
   return title.trim().slice(0, 64);
 }
 
+function sanitizeParticipantLimit(value: unknown): number | null {
+  if (value == null) {
+    return DEFAULT_PARTICIPANTS_PER_ROOM;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = Math.floor(value);
+  if (normalized < ROOM_PARTICIPANT_LIMIT_MIN || normalized > ROOM_PARTICIPANT_LIMIT_MAX) {
+    return null;
+  }
+  return normalized;
+}
+
+function getParticipantAudienceCount(room: Room): number {
+  let count = 0;
+  for (const participant of room.participants.values()) {
+    if (participant.role === 'participant') {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function sanitizePageId(value: unknown): string {
   if (typeof value !== 'string') {
     return '';
@@ -883,14 +910,14 @@ function sanitizePageId(value: unknown): string {
 }
 
 function sanitizePageKind(value: unknown): MeetingPageKind | null {
-  if (value === 'canvas' || value === 'selfIntro' || value === 'showcase') {
+  if (value === 'canvas' || value === 'showcase') {
     return value;
   }
   return null;
 }
 
 function sanitizePageTheme(value: unknown): MeetingPageTheme | null {
-  if (value === 1 || value === 2 || value === 3) {
+  if (value === 1 || value === 3) {
     return value;
   }
   return null;
@@ -925,7 +952,30 @@ function sanitizePagesInput(value: unknown): MeetingPageDefinition[] | null {
       return null;
     }
 
+    if (kind === 'canvas' && theme !== 1) {
+      return null;
+    }
+    if (kind === 'showcase' && theme !== 3) {
+      return null;
+    }
+
     seenIds.add(id);
+    if (kind === 'showcase') {
+      const submissionMode = sanitizePageSubmissionMode(rawPage.submissionMode);
+      const rankingEnabled = sanitizePageRankingEnabled(rawPage.rankingEnabled);
+      if (!submissionMode || rankingEnabled == null) {
+        return null;
+      }
+      pages.push({
+        id,
+        kind,
+        theme,
+        title,
+        submissionMode,
+        rankingEnabled,
+      });
+      continue;
+    }
     pages.push({
       id,
       kind,
@@ -937,6 +987,26 @@ function sanitizePagesInput(value: unknown): MeetingPageDefinition[] | null {
   return pages;
 }
 
+function sanitizePageSubmissionMode(value: unknown): PageSubmissionMode | null {
+  if (value == null) {
+    return 'url';
+  }
+  if (value === 'url' || value === 'image') {
+    return value;
+  }
+  return null;
+}
+
+function sanitizePageRankingEnabled(value: unknown): boolean | null {
+  if (value == null) {
+    return true;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return null;
+}
+
 function normalizeTicket(ticket: string): string {
   if (typeof ticket !== 'string') {
     return '';
@@ -944,7 +1014,7 @@ function normalizeTicket(ticket: string): string {
   return ticket.trim().toUpperCase();
 }
 
-function sanitizeWorkUrl(input: string): string {
+function sanitizeHttpWorkUrl(input: string): string {
   if (typeof input !== 'string') {
     return '';
   }
@@ -964,6 +1034,24 @@ function sanitizeWorkUrl(input: string): string {
   }
 }
 
+function sanitizeImageWorkUrl(input: string): string {
+  if (typeof input !== 'string') {
+    return '';
+  }
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.length > MAX_WORK_URL_LENGTH) {
+    return '';
+  }
+  if (!isBase64ImageDataUrl(trimmed)) {
+    return '';
+  }
+  return trimmed;
+}
+
+function isBase64ImageDataUrl(value: string): boolean {
+  return /^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/.test(value);
+}
+
 function sanitizeWorkDescription(input: string): string {
   if (typeof input !== 'string') {
     return '';
@@ -973,4 +1061,47 @@ function sanitizeWorkDescription(input: string): string {
     return '';
   }
   return trimmed;
+}
+
+function isValidSubmissionForMode(
+  submission: ParticipantWorks[string] | undefined,
+  mode: PageSubmissionMode,
+): boolean {
+  if (!submission) {
+    return false;
+  }
+  const validDescription = sanitizeWorkDescription(submission.description);
+  if (!validDescription) {
+    return false;
+  }
+  const validUrl = mode === 'image' ? sanitizeImageWorkUrl(submission.url) : sanitizeHttpWorkUrl(submission.url);
+  if (!validUrl) {
+    return false;
+  }
+  return typeof submission.updatedAt === 'number' && Number.isFinite(submission.updatedAt);
+}
+
+function cloneParticipantWorks(works: ParticipantWorks | undefined): ParticipantWorks | undefined {
+  if (!works) {
+    return undefined;
+  }
+
+  const entries = Object.entries(works);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  const cloned: ParticipantWorks = {};
+  for (const [pageId, submission] of entries) {
+    if (!pageId || !submission) {
+      continue;
+    }
+    cloned[pageId] = {
+      url: submission.url,
+      description: submission.description,
+      updatedAt: submission.updatedAt,
+    };
+  }
+
+  return Object.keys(cloned).length > 0 ? cloned : undefined;
 }

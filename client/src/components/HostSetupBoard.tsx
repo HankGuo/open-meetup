@@ -1,25 +1,45 @@
 import { useEffect, useState } from 'react';
 import {
+  CheckCircle2,
+  Copy,
   GripVertical,
   Image as ImageIcon,
   LayoutGrid,
+  LogOut,
   Pencil,
   Play,
   Plus,
+  Power,
+  RadioTower,
   Sparkles,
+  Ticket,
   Trash2,
-  Users,
+  X,
 } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { createNewPage } from '../meetingConfig';
-import { MeetingPageDefinition, MeetingPageKind } from '../types';
+import { MeetingPageDefinition, PageSubmissionMode } from '../types';
 import { PageEditor } from './PageEditor';
 
 interface HostSetupBoardProps {
   defaultSelectedPageId?: string | null;
+  roomTitle?: string;
+  ticketCode?: string;
+  copiedTicket?: boolean;
+  onCopyTicket?: () => void;
+  onLeaveRoom?: () => void;
+  onEndRoom?: () => void;
 }
 
-export function HostSetupBoard({ defaultSelectedPageId }: HostSetupBoardProps) {
+export function HostSetupBoard({
+  defaultSelectedPageId,
+  roomTitle,
+  ticketCode,
+  copiedTicket = false,
+  onCopyTicket,
+  onLeaveRoom,
+  onEndRoom,
+}: HostSetupBoardProps) {
   const { pages, updatePages, startLive, isConnected } = useMeeting();
   const [draftPages, setDraftPages] = useState<MeetingPageDefinition[]>(pages);
   const [saving, setSaving] = useState(false);
@@ -27,6 +47,11 @@ export function HostSetupBoard({ defaultSelectedPageId }: HostSetupBoardProps) {
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
+
+  const [showCreateShowcaseDialog, setShowCreateShowcaseDialog] = useState(false);
+  const [newShowcaseMode, setNewShowcaseMode] = useState<PageSubmissionMode>('url');
+  const [newShowcaseRankingEnabled, setNewShowcaseRankingEnabled] = useState(true);
+  const [newShowcaseTitle, setNewShowcaseTitle] = useState('');
 
   useEffect(() => {
     setDraftPages(pages);
@@ -85,11 +110,31 @@ export function HostSetupBoard({ defaultSelectedPageId }: HostSetupBoardProps) {
     await commitPages(reordered);
   }
 
-  async function handleAddPage(kind: MeetingPageKind) {
-    const sameKindCount = draftPages.filter((page) => page.kind === kind).length;
-    const newPage = createNewPage(kind, sameKindCount + 1);
+  async function handleAddCanvasPage() {
+    const sameKindCount = draftPages.filter((page) => page.kind === 'canvas').length;
+    const newPage = createNewPage('canvas', sameKindCount + 1);
     await commitPages([...draftPages, newPage]);
     setSelectedPageId(newPage.id);
+  }
+
+  function openCreateShowcaseDialog() {
+    setNewShowcaseMode('url');
+    setNewShowcaseRankingEnabled(true);
+    setNewShowcaseTitle('');
+    setShowCreateShowcaseDialog(true);
+  }
+
+  async function handleCreateShowcasePage() {
+    const sameKindCount = draftPages.filter((page) => page.kind === 'showcase').length;
+    const newPage = createNewPage('showcase', sameKindCount + 1, {
+      submissionMode: newShowcaseMode,
+      rankingEnabled: newShowcaseRankingEnabled,
+      title: newShowcaseTitle,
+    });
+
+    await commitPages([...draftPages, newPage]);
+    setSelectedPageId(newPage.id);
+    setShowCreateShowcaseDialog(false);
   }
 
   async function handleRemovePage(pageId: string) {
@@ -104,160 +149,277 @@ export function HostSetupBoard({ defaultSelectedPageId }: HostSetupBoardProps) {
     await commitPages(nextPages);
   }
 
-  async function handleStartLive() {
-    if (!confirm('确认进入播放环节？进入后将禁止继续编辑页面。')) {
+  async function handleRenamePageTitle(targetPage: MeetingPageDefinition, rawTitle: string) {
+    const trimmed = rawTitle.trim().slice(0, 64);
+    const fallbackTitle = targetPage.title.trim() || getDefaultPageTitle(targetPage);
+    const nextTitle = trimmed || fallbackTitle;
+    if (nextTitle === targetPage.title) {
       return;
     }
+
+    const nextPages = draftPages.map((pageItem) => {
+      if (pageItem.id !== targetPage.id) {
+        return pageItem;
+      }
+      return {
+        ...pageItem,
+        title: nextTitle,
+      };
+    });
+    await commitPages(nextPages);
+  }
+
+  async function handleStartLive() {
     setStarting(true);
     await startLive();
     setStarting(false);
   }
 
+  const pageCountLabel = saving ? '同步中...' : `已编排 ${draftPages.length} 页`;
+  const connectionLabel = isConnected ? '连接正常' : '连接中断';
+  const displayTitle = roomTitle?.trim() || '未命名房间';
+
   return (
     <div className="page-enter h-full w-full overflow-hidden text-[var(--text)]">
       <div className="mx-auto flex h-full w-full max-w-[1480px] flex-col px-3 pb-4 pt-4 md:px-5">
-        <div className="glass-panel flex flex-wrap items-start justify-between gap-4 px-5 py-4">
+        <div className="light-panel flex flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-5">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] px-3 py-1 text-[11px] font-semibold tracking-[0.14em] text-[var(--primary)]">
               <Sparkles className="h-3.5 w-3.5" />
-              SETUP STAGE
+              SETUP
             </div>
-            <h2 className="mt-2 text-xl font-semibold">页面编排台</h2>
-            <p className="mt-1 text-sm text-[var(--text-soft)]">
-              当前不预置任何页面，请按需新增。拖拽可调顺序，点击卡片可进入编辑。
-            </p>
+            <h2 className="mt-1.5 text-lg font-semibold text-[var(--text)]">房间编排控制台</h2>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="status-pill">{saving ? '同步中...' : `共 ${draftPages.length} 页`}</span>
-            <button
-              type="button"
-              onClick={handleStartLive}
-              disabled={starting || saving || !isConnected || draftPages.length === 0}
-              className="btn-base btn-primary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Play className="h-4 w-4" />
-              {starting ? '进入中...' : '确认并开始播放'}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="status-pill max-w-[260px]">
+              <span className="truncate">房间：{displayTitle}</span>
+            </span>
+            <span className="status-pill">{pageCountLabel}</span>
+            <span className={`status-pill ${isConnected ? 'status-pill--online' : 'status-pill--offline'}`}>
+              <RadioTower className="h-3.5 w-3.5" />
+              {connectionLabel}
+            </span>
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-          <button
-            type="button"
-            onClick={() => void handleAddPage('canvas')}
-            disabled={saving}
-            className="btn-base tone-btn tone-btn--canvas h-11 disabled:opacity-55"
-          >
-            <Plus className="h-4 w-4" />
-            新增轻量自由画布
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleAddPage('selfIntro')}
-            disabled={saving}
-            className="btn-base tone-btn tone-btn--selfintro h-11 disabled:opacity-55"
-          >
-            <Plus className="h-4 w-4" />
-            新增名牌广场页
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleAddPage('showcase')}
-            disabled={saving}
-            className="btn-base tone-btn tone-btn--showcase h-11 disabled:opacity-55"
-          >
-            <Plus className="h-4 w-4" />
-            新增作品陈列页
-          </button>
-        </div>
-
-        <div className="mt-3 min-h-0 flex-1 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3 md:p-4">
-          {draftPages.length === 0 ? (
-            <div className="flex h-full min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)] px-6 text-center">
-              <div className="max-w-md">
-                <p className="text-sm font-semibold text-[var(--text)]">编排台为空</p>
-                <p className="mt-2 text-sm text-[var(--text-soft)]">
-                  当前没有任何预置页面。点击上方按钮开始搭建你的会议流程。
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="grid max-h-full grid-cols-1 gap-3 overflow-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
-              {draftPages.map((page, index) => {
-                const selected = selectedPageId === page.id;
-                const kindMeta = getPageKindMeta(page.kind);
-                const isDragging = draggingPageId === page.id;
-                return (
-                  <div
-                    key={page.id}
-                    draggable
-                    onDragStart={() => setDraggingPageId(page.id)}
-                    onDragEnd={() => setDraggingPageId(null)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => void handleDrop(page.id)}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      setSelectedPageId(page.id);
-                      if (page.kind === 'canvas') {
-                        setEditingPageId(page.id);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') {
-                        return;
-                      }
-                      event.preventDefault();
-                      setSelectedPageId(page.id);
-                      if (page.kind === 'canvas') {
-                        setEditingPageId(page.id);
-                      }
-                    }}
-                    className={`group relative w-full rounded-2xl border p-4 text-left transition ${
-                      selected
-                        ? `${kindMeta.selectedClass}`
-                        : `${kindMeta.cardClass} hover:-translate-y-0.5 hover:brightness-105`
-                    } ${isDragging ? 'opacity-45' : ''}`}
+        <div className="mt-3 grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="app-card min-h-0 overflow-hidden">
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 md:px-5">
+                <div>
+                  <h3 className="text-base font-semibold text-[var(--text)]">页面流程</h3>
+                  <p className="mt-1 text-xs text-[var(--text-soft)]">核心编排区域：点击卡片编辑，拖拽调整播放顺序。</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleAddCanvasPage()}
+                    disabled={saving}
+                    className="btn-base btn-compact btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div
-                          className={`inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${kindMeta.badgeClass}`}
-                        >
-                          {kindMeta.icon}
-                          {kindMeta.label}
-                        </div>
-                        <p className="mt-2 text-xs font-medium text-[var(--text-soft)]">第 {index + 1} 页</p>
-                      </div>
+                    <Plus className="h-3.5 w-3.5" />
+                    新增自由画布
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openCreateShowcaseDialog}
+                    disabled={saving}
+                    className="btn-base btn-compact btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    新增互动页
+                  </button>
+                </div>
+              </div>
 
-                      <div className="flex items-center gap-1">
-                        <GripVertical className="h-4 w-4 shrink-0 text-[var(--text-soft)]" />
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleRemovePage(page.id);
-                          }}
-                          aria-label="删除页面"
-                          className="btn-base btn-compact h-7 w-7 rounded-md border border-[var(--border)] bg-[var(--panel-light)] p-0 text-[var(--text-soft)] hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <p className="mt-3 text-sm text-[var(--text-soft)]">{kindMeta.description}</p>
-
-                    <div className={`mt-4 inline-flex items-center gap-1 text-xs font-medium ${kindMeta.hintClass}`}>
-                      <LayoutGrid className="h-3.5 w-3.5" />
-                      {page.kind === 'canvas' ? '点击进入编辑' : '固定业务页（播放态自动渲染）'}
+              <div className="min-h-0 flex-1 overflow-auto p-3 md:p-4">
+                {draftPages.length === 0 ? (
+                  <div className="flex h-full min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)] px-6 text-center">
+                    <div className="max-w-md">
+                      <p className="text-sm font-semibold text-[var(--text)]">编排台为空</p>
+                      <p className="mt-2 text-sm text-[var(--text-soft)]">当前没有页面。先新增自由画布或互动页，再开始你的房间流程编排。</p>
                     </div>
                   </div>
-                );
-              })}
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 pr-1 sm:grid-cols-2 2xl:grid-cols-3">
+                    {draftPages.map((page, index) => {
+                      const selected = selectedPageId === page.id;
+                      const pageMeta = getPageMeta(page);
+                      const isDragging = draggingPageId === page.id;
+                      const isShowcase = page.kind === 'showcase';
+                      const modeLabel = page.submissionMode === 'image' ? '图片' : 'URL';
+                      const rankingLabel = page.rankingEnabled === false ? '关闭排名' : '开启排名';
+                      return (
+                        <div
+                          key={page.id}
+                          draggable
+                          onDragStart={() => setDraggingPageId(page.id)}
+                          onDragEnd={() => setDraggingPageId(null)}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={() => void handleDrop(page.id)}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            setSelectedPageId(page.id);
+                            if (page.kind === 'canvas') {
+                              setEditingPageId(page.id);
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ') {
+                              return;
+                            }
+                            event.preventDefault();
+                            setSelectedPageId(page.id);
+                            if (page.kind === 'canvas') {
+                              setEditingPageId(page.id);
+                            }
+                          }}
+                          className={`group relative w-full cursor-pointer rounded-2xl border p-4 text-left transition ${
+                            selected
+                              ? `${pageMeta.selectedClass} shadow-[0_14px_28px_oklch(0.45_0.03_206_/_0.18)]`
+                              : `${pageMeta.cardClass} hover:-translate-y-0.5 hover:shadow-[0_12px_24px_oklch(0.42_0.02_206_/_0.16)]`
+                          } ${isDragging ? 'opacity-45' : ''}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--panel-light)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text-soft)]">
+                                  第 {index + 1} 页
+                                </span>
+                                <div
+                                  className={`inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${pageMeta.badgeClass}`}
+                                >
+                                  {pageMeta.icon}
+                                  {pageMeta.label}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <GripVertical className="h-4 w-4 shrink-0 text-[var(--text-soft)]" />
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleRemovePage(page.id);
+                                }}
+                                aria-label="删除页面"
+                                className="btn-base btn-compact h-7 w-7 rounded-md border border-[var(--border)] bg-[var(--panel-light)] p-0 text-[var(--text-soft)] hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <label className="mt-3 block">
+                            <span className="mb-1 block text-[11px] font-semibold tracking-[0.08em] text-[var(--text-soft)]">
+                              {isShowcase ? '互动页标题' : '自由画布标题'}
+                            </span>
+                            <input
+                              type="text"
+                              key={`${page.id}:${page.title}`}
+                              defaultValue={page.title || ''}
+                              autoComplete="off"
+                              autoCorrect="off"
+                              spellCheck={false}
+                              placeholder={getDefaultPageTitle(page)}
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                              onBlur={(event) => void handleRenamePageTitle(page, event.target.value)}
+                              className="app-input app-input-light h-9 px-3 text-sm"
+                            />
+                          </label>
+                          <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">{pageMeta.description}</p>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                            {isShowcase ? (
+                              <>
+                                <span className="rounded-full border border-[var(--border)] bg-[var(--panel-light)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-soft)]">
+                                  上传类型：{modeLabel}
+                                </span>
+                                <span className="rounded-full border border-[var(--border)] bg-[var(--panel-light)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-soft)]">
+                                  {rankingLabel}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="rounded-full border border-[var(--border)] bg-[var(--panel-light)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-soft)]">
+                                支持网页/图片/HTML/Markdown
+                              </span>
+                            )}
+                          </div>
+
+                          <div className={`mt-4 inline-flex items-center gap-1 text-xs font-medium ${pageMeta.hintClass}`}>
+                            <LayoutGrid className="h-3.5 w-3.5" />
+                            {page.kind === 'canvas' ? '点击进入编辑' : '播放态自动渲染（可折叠操作端）'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+          </section>
+
+          <aside className="flex min-h-0 flex-col gap-3">
+            {ticketCode ? (
+              <div className="app-card p-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="section-title">Host Ticket</p>
+                  <Ticket className="h-4 w-4 text-[var(--accent)]" />
+                </div>
+                <p className="mono mt-1 truncate text-sm font-semibold text-[var(--text)]">{ticketCode}</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--text-soft)]">更换浏览器或使用隐私模式时用于恢复主持人身份。</p>
+                <button
+                  type="button"
+                  onClick={() => onCopyTicket?.()}
+                  disabled={!onCopyTicket}
+                  className="btn-base btn-secondary mt-2.5 h-9 w-full rounded-lg px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {copiedTicket ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                  {copiedTicket ? '已复制 Ticket' : '复制 Ticket'}
+                </button>
+              </div>
+            ) : null}
+
+            <div className="app-card p-3.5">
+              <p className="section-title">播放控制</p>
+              <button
+                type="button"
+                onClick={handleStartLive}
+                disabled={starting || saving || !isConnected || draftPages.length === 0}
+                className="btn-base btn-primary mt-2 h-11 w-full disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play className="h-4 w-4" />
+                {starting ? '进入播放中...' : '开始播放'}
+              </button>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onLeaveRoom?.()}
+                  disabled={!onLeaveRoom}
+                  className="btn-base btn-secondary h-10 rounded-lg px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <LogOut className="h-4 w-4" />
+                  退出房间
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onEndRoom?.()}
+                  disabled={!onEndRoom}
+                  className="btn-base btn-danger-soft h-10 rounded-lg px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Power className="h-4 w-4" />
+                  结束房间
+                </button>
+              </div>
+
+              <p className="mt-2 text-xs text-[var(--text-soft)]">进入播放后会锁定页面结构，仅保留翻页与互动控制。</p>
+            </div>
+          </aside>
         </div>
       </div>
 
@@ -270,11 +432,94 @@ export function HostSetupBoard({ defaultSelectedPageId }: HostSetupBoardProps) {
           }}
         />
       )}
+
+      {showCreateShowcaseDialog ? (
+        <div className="dialog-overlay fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={() => setShowCreateShowcaseDialog(false)}>
+          <div className="dialog-panel w-full max-w-lg overflow-hidden" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold tracking-[0.08em] text-[var(--accent)]">互动页配置</p>
+                <h3 className="mt-1 text-lg font-semibold text-[var(--text)]">设置上传类型与排名规则</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateShowcaseDialog(false)}
+                className="btn-base btn-secondary h-9 w-9 rounded-md p-0"
+                aria-label="关闭"
+                title="关闭"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-4">
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--text)]">互动页标题（可自定义）</span>
+                <input
+                  type="text"
+                  value={newShowcaseTitle}
+                  onChange={(event) => setNewShowcaseTitle(event.target.value)}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="默认：互动页 N"
+                  className="app-input app-input-light"
+                />
+              </label>
+
+              <p className="mt-4 text-sm font-medium text-[var(--text)]">上传内容类型</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewShowcaseMode('url')}
+                  className={`btn-base h-10 rounded-md text-sm ${newShowcaseMode === 'url' ? 'btn-primary' : 'btn-secondary'}`}
+                >
+                  URL 链接
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewShowcaseMode('image')}
+                  className={`btn-base h-10 rounded-md text-sm ${newShowcaseMode === 'image' ? 'btn-primary' : 'btn-secondary'}`}
+                >
+                  图片上传
+                </button>
+              </div>
+
+              <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-[var(--text)]">
+                <input
+                  type="checkbox"
+                  checked={newShowcaseRankingEnabled}
+                  onChange={(event) => setNewShowcaseRankingEnabled(event.target.checked)}
+                />
+                开启排名（前三名显示金银铜皇冠）
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setShowCreateShowcaseDialog(false)}
+                className="btn-base btn-secondary h-9 rounded-md px-3 text-sm"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCreateShowcasePage()}
+                disabled={saving}
+                className="btn-base btn-primary h-9 rounded-md px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                确认新增
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function getPageKindMeta(kind: MeetingPageKind): {
+function getPageMeta(page: MeetingPageDefinition): {
   label: string;
   description: string;
   icon: JSX.Element;
@@ -283,21 +528,12 @@ function getPageKindMeta(kind: MeetingPageKind): {
   badgeClass: string;
   hintClass: string;
 } {
-  if (kind === 'selfIntro') {
+  if (page.kind === 'showcase') {
+    const modeLabel = page.submissionMode === 'image' ? '图片' : 'URL';
+    const rankingLabel = page.rankingEnabled === false ? '不启用排名' : '启用排名';
     return {
-      label: '名牌广场',
-      description: '参与者信息名牌按宫格陈列，可点开查看详情。',
-      icon: <Users className="h-3.5 w-3.5" />,
-      cardClass: 'kind-card kind-card--selfintro',
-      selectedClass: 'kind-card kind-card--selfintro-active',
-      badgeClass: 'kind-badge kind-badge--selfintro',
-      hintClass: 'kind-hint--selfintro',
-    };
-  }
-  if (kind === 'showcase') {
-    return {
-      label: '作品陈列',
-      description: '展示参与者提交的 URL 作品与一句话描述，支持全屏查看。',
+      label: '互动页',
+      description: `参与者提交 ${modeLabel} 内容统一展示，当前${rankingLabel}。`,
       icon: <ImageIcon className="h-3.5 w-3.5" />,
       cardClass: 'kind-card kind-card--showcase',
       selectedClass: 'kind-card kind-card--showcase-active',
@@ -305,6 +541,7 @@ function getPageKindMeta(kind: MeetingPageKind): {
       hintClass: 'kind-hint--showcase',
     };
   }
+
   return {
     label: '自由画布',
     description: '用于放置网页、图片、HTML 或 Markdown 内容块。',
@@ -314,4 +551,11 @@ function getPageKindMeta(kind: MeetingPageKind): {
     badgeClass: 'kind-badge kind-badge--canvas',
     hintClass: 'kind-hint--canvas',
   };
+}
+
+function getDefaultPageTitle(page: MeetingPageDefinition): string {
+  if (page.kind === 'showcase') {
+    return '互动页';
+  }
+  return '自由画布';
 }

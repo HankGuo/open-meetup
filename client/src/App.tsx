@@ -6,6 +6,7 @@ import { HostPage } from './pages/HostPage';
 import { ParticipantPage } from './pages/ParticipantPage';
 import { clearRoomEntryStorage } from './context/storage';
 import { Loader2 } from 'lucide-react';
+import { buildServerApiUrl } from './serverUrl';
 
 type AppView = 'checking' | 'lobby' | 'join' | 'room';
 
@@ -26,7 +27,7 @@ function AppContent() {
 
   async function checkServerState() {
     try {
-      const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/current`);
+      const response = await fetch(buildServerApiUrl('/api/room/current'));
       const data = await response.json();
 
       if (!data.exists) {
@@ -51,7 +52,7 @@ function AppContent() {
             <Loader2 className="h-6 w-6 animate-spin text-[var(--accent)]" />
           </div>
           <p className="text-base font-semibold text-[var(--text)]">正在检查房间状态</p>
-          <p className="mt-2 text-sm text-[var(--text-soft)]">请稍候，正在连接会议服务</p>
+          <p className="mt-2 text-sm text-[var(--text-soft)]">请稍候，正在连接房间服务</p>
         </div>
       </div>
     );

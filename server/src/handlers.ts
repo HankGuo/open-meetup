@@ -1,7 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { RoomManager } from './roomManager';
-import { ErrorResponse, MeetingPageDefinition, PageContent, RoomCloseReason, SocketIdentity, SocketResult } from './types';
-import { deleteManagedUploadByRelativePath, getManagedRelativePathFromContent } from './uploadStorage';
+import { ErrorResponse, MeetingPageDefinition, RoomCloseReason, SocketIdentity, SocketResult } from './types';
 
 type AckFn<T = unknown> = (response: T) => void;
 
@@ -9,12 +8,11 @@ interface CreateRoomPayload {
   userName: string;
   title: string;
   password: string;
-  avatar?: string;
+  participantLimit?: number;
 }
 
 interface JoinRoomPayload {
   userName: string;
-  avatar?: string;
   ticket?: string;
 }
 
@@ -24,6 +22,7 @@ interface ReconnectPayload {
 }
 
 interface WorkSubmitPayload {
+  pageId: string;
   url: string;
   description: string;
 }
@@ -73,7 +72,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
           payload?.title ?? '',
           payload?.password ?? '',
           socket.id,
-          payload?.avatar,
+          payload?.participantLimit,
         );
         if (!result.success) {
           ack(callback, result);
@@ -97,7 +96,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         const result = roomManager.joinRoom(
           payload?.userName ?? '',
           socket.id,
-          payload?.avatar,
           payload?.ticket,
         );
         if (!result.success) {
@@ -293,24 +291,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       ack(callback, { success: true, data: null });
     });
 
-    socket.on('control:end', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
-
-      const result = roomManager.forceEndRoom(identity);
-      if (!result.success) {
-        ack(callback, result);
-        return;
-      }
-
-      clearSocketIdentity(socket);
-      io.emit('room:closed', { reason: 'HOST_ENDED' });
-      ack(callback, { success: true, data: null });
-    });
-
     socket.on('pages:update', (payload: PagesUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
       const identity = getSocketIdentity(socket);
       if (!identity) {
@@ -344,9 +324,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       }
 
       const pageId = payload?.pageId ?? '';
-      const stateBeforeUpdate = roomManager.getStateByIdentity(identity);
-      const previousContent = getPageContentById(stateBeforeUpdate, pageId);
-
       const content = payload.content
         ? { type: payload.content.type as 'canvas' | 'image' | 'url' | 'html' | 'markdown', content: payload.content.content }
         : null;
@@ -356,8 +333,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         ack(callback, result);
         return;
       }
-
-      cleanupPreviousUploadAsset(previousContent, content);
 
       io.emit('state:sync', {
         participants: result.data.participants,
@@ -378,7 +353,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      const result = roomManager.submitWork(identity, payload?.url ?? '', payload?.description ?? '');
+      const result = roomManager.submitWork(identity, payload?.pageId ?? '', payload?.url ?? '', payload?.description ?? '');
       if (!result.success) {
         ack(callback, result);
         return;
@@ -462,36 +437,4 @@ function broadcastRoomState(io: Server, roomManager: RoomManager) {
 interface SocketData {
   identity?: SocketIdentity;
   authCandidate?: SocketIdentity;
-}
-
-function getPageContentById(
-  state: SocketResult<{
-    pageContents?: Array<[string, PageContent]>;
-  }>,
-  pageId: string,
-): PageContent | null {
-  if (!state.success) {
-    return null;
-  }
-  const entries = state.data.pageContents ?? [];
-  for (const [id, content] of entries) {
-    if (id === pageId) {
-      return content;
-    }
-  }
-  return null;
-}
-
-function cleanupPreviousUploadAsset(previousContent: PageContent | null, nextContent: PageContent | null) {
-  const previousRelativePath = getManagedRelativePathFromContent(previousContent);
-  if (!previousRelativePath) {
-    return;
-  }
-
-  const nextRelativePath = getManagedRelativePathFromContent(nextContent);
-  if (nextRelativePath === previousRelativePath) {
-    return;
-  }
-
-  deleteManagedUploadByRelativePath(previousRelativePath);
 }

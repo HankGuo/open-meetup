@@ -1,250 +1,283 @@
-# Open Meetup
+# Open Meetup（无脑启动版）
 
-> 一个交互式演示工具，基于 **React + Socket.IO + TypeScript**。
-> 支持主持人控制演示流程、参与者实时同步、Ticket 验证系统。
+一个单房间实时互动系统，基于 **React + Socket.IO + TypeScript**。
 
-## ✨ 核心能力
+如果你只想跑起来，不想看原理，直接看「30 秒启动」。
 
-- **交互式演示**：5 页内容由主持人统一控场
-  1. 欢迎开场致辞
-  2. HELLO 黑客松详情介绍
-  3. 新闻资讯
-  4. 重新认识你的豆包
-  5. 自我介绍环节
-- **单房间机制**：系统运行期间有且只有一个有效房间
-- **Ticket 系统**：首次加入分配唯一 Ticket，验证后快速入场
-- **电子名片**：头像上传，自我介绍环节展示参与者 Grid
-- **扫码入会**：二维码 + 链接分享，Ticket 用户一键加入
+## 1. 你会得到什么
 
-## 🔐 安全设计
+- 一个可创建/加入的实时房间系统
+- 主持人先编排页面（`setup`），再开始播放（`live`）
+- 参与者通过 Ticket 识别身份，可恢复进入
+- 互动页支持图片或 URL 提交，支持可选排名
 
-- 主持人权限由服务端判定，客户端不可伪造
-- Ticket 验证在服务端完成
-- 授权口令创建房间
+## 2. 30 秒启动（最短路径）
 
-## 🧱 技术栈
+### macOS / Linux（推荐）
 
-- **Client**: React 18、Vite 5、TypeScript、TailwindCSS、Socket.IO Client、qrcode.react
-- **Server**: Node.js、Express、Socket.IO、TypeScript
-
-## 🏗️ 架构概览
-
-```mermaid
-flowchart LR
-  U1[Host 浏览器] -- Socket.IO --> S[Open Meetup Server]
-  U2[Participant 浏览器] -- Socket.IO --> S
-  S --> RM[RoomManager\n房间状态/鉴权/生命周期]
-  S --> API[/api/room/*]
+```bash
+cd /Users/hankia/Develop/AI/open-meetup
+npm run install:all
+npm run dev:restart -- --host-password 12345678
 ```
 
-## 🚀 快速开始
+看到以下信息就算成功：
 
-### 环境要求
+- `Server (local): http://localhost:3001`
+- `Client (local): http://localhost:5173`
 
-- Node.js **>= 18**
-- npm **>= 9**
+然后打开浏览器访问：
 
-### 安装依赖
+- 前端：`http://localhost:5173`
+
+### Windows（PowerShell）
+
+如果你没有 `bash`（即不能用 `dev:restart`），用下面这套：
+
+```powershell
+cd /Users/hankia/Develop/AI/open-meetup
+npm run install:all
+$env:HOST_PASSWORD="12345678"
+npm run dev
+```
+
+打开：`http://localhost:5173`
+
+## 3. 完整新手流程（一步一步）
+
+### 第 0 步：检查环境
+
+```bash
+node -v
+npm -v
+```
+
+要求：
+
+- Node.js >= 18
+- npm >= 9
+
+### 第 1 步：安装依赖
 
 ```bash
 npm run install:all
 ```
 
-### 启动开发服务器
+### 第 2 步：启动项目
+
+推荐（带日志、支持参数）：
+
+```bash
+npm run dev:restart -- --host-password 12345678
+```
+
+常规（不带脚本增强能力）：
 
 ```bash
 npm run dev
 ```
 
-- 服务器运行在 http://localhost:3001
-- 前端运行在 http://localhost:5173
+### 第 3 步：验证服务是否正常
 
-### 构建生产版本
+打开：
+
+- `http://localhost:5173`（前端）
+- `http://localhost:3001/health`（后端健康检查）
+
+`/health` 返回 `{"status":"ok", ...}` 即正常。
+
+### 第 4 步：创建房间
+
+1. 打开前端页面
+2. 填写：你的姓名、房间标题、授权口令、参与者人数上限
+3. 授权口令默认是：`12345678`
+4. 创建成功后进入主持人编排台
+
+### 第 5 步：参与者加入
+
+- 首次加入：填昵称后加入，系统发 Ticket
+- 后续加入：直接输入 Ticket
+- 自动读取本地 Ticket 时，也会先到后端校验
+
+## 4. 默认配置（你最关心的）
+
+- 主持人授权口令默认值：`12345678`
+- 服务端默认监听：`0.0.0.0:3001`
+- 前端默认端口：`5173`
+- 创建房间时默认人数上限：`50`（不含主持人）
+
+## 5. 如何改授权口令
+
+### 方法 A：启动脚本参数（最简单）
+
+```bash
+npm run dev:restart -- --host-password my-secret-password
+```
+
+### 方法 B：环境变量
+
+```bash
+HOST_PASSWORD=my-secret-password npm run dev:server
+```
+
+## 6. 支持任意 IP 访问（手机/局域网）
+
+本项目已默认支持局域网访问：
+
+- 服务端绑定 `0.0.0.0`
+- 前端 Vite 绑定 `0.0.0.0`
+- 前端未配置 `VITE_SERVER_URL` 时，会自动按当前页面主机名连接后端
+
+### 操作步骤
+
+1. 保证手机和电脑在同一局域网
+2. 启动时看 `dev:restart` 输出中的 `Client (LAN)` 地址
+3. 手机上直接访问该地址，例如：`http://192.168.1.23:5173`
+
+如果 `dev:restart` 没打印出 LAN 地址，可手动查本机 IP：
+
+macOS:
+
+```bash
+ipconfig getifaddr en0
+```
+
+Windows:
+
+```powershell
+ipconfig
+```
+
+然后访问：`http://<你的IP>:5173`
+
+## 7. 前后端地址规则（避免踩坑）
+
+客户端连接后端顺序如下：
+
+1. 如果设置了 `VITE_SERVER_URL`，优先使用它
+2. 如果没设置，自动用“当前页面主机名 + :3001”
+
+所以在局域网访问场景，通常不需要再改前端配置。
+
+## 8. 常用命令速查
+
+```bash
+# 安装所有依赖
+npm run install:all
+
+# 同时启动前后端
+npm run dev
+
+# 推荐启动（支持 host-password、端口参数、日志）
+npm run dev:restart -- --host-password 12345678
+
+# 停止开发进程
+npm run dev:stop
+
+# 构建
+npm run build
+
+# 测试
+npm test
+
+# 批量加入模拟（独立工具，不耦合主流程）
+npm run sim:bulk-join
+```
+
+## 9. 环境变量清单
+
+### 服务端
+
+- `HOST_PASSWORD`：主持人授权口令，默认 `12345678`
+- `HOST`：监听地址，默认 `0.0.0.0`
+- `PORT`：服务端端口，默认 `3001`
+- `MAX_PARTICIPANTS_PER_ROOM`：创建房间默认人数上限，默认 `50`，范围 `1-500`
+- `ROOM_CLEANUP_INTERVAL_MS`：清理间隔，默认 `30000`
+
+### 前端
+
+- `VITE_SERVER_URL`：可选，显式指定后端地址
+- `VITE_SOCKET_ACK_TIMEOUT_MS`：Socket ACK 超时，默认 `6000`
+
+## 10. 常见问题（复制即用）
+
+### Q1: 页面打不开 / 白屏
+
+```bash
+npm run dev:stop
+rm -rf node_modules client/node_modules server/node_modules
+npm run install:all
+npm run dev:restart -- --host-password 12345678
+```
+
+### Q2: 3001 或 5173 端口被占用
+
+先停：
+
+```bash
+npm run dev:stop
+```
+
+再用新端口启动：
+
+```bash
+npm run dev:restart -- --host-password 12345678 --server-port 3101 --client-port 5174
+```
+
+### Q3: 提示授权口令错误
+
+- 确认你创建房间时输入的口令，和服务端实际 `HOST_PASSWORD` 一致
+- 如果你用的是 `dev:restart -- --host-password ...`，以该参数为准
+
+### Q4: Ticket 无效
+
+- 确认 Ticket 没输错
+- 房间已经结束时，所有旧 Ticket 会失效
+- 手动输入和本地读取都会走服务端校验，这是正常行为
+
+### Q5: 手机访问不到
+
+- 必须同一局域网
+- 用 `http://<电脑IP>:5173`
+- 关闭系统防火墙或放行 3001/5173（仅内网测试环境）
+
+## 11. 项目结构（关键文件）
+
+```text
+open-meetup/
+├── client/
+│   └── src/
+│       ├── components/
+│       ├── context/
+│       ├── pages/
+│       ├── serverUrl.ts
+│       ├── socket.ts
+│       └── App.tsx
+├── server/
+│   └── src/
+│       ├── index.ts
+│       ├── handlers.ts
+│       ├── roomManager.ts
+│       └── config.ts
+└── scripts/
+    ├── dev-restart.sh
+    ├── dev-stop.sh
+    └── bulk-join-simulator/
+```
+
+## 12. 发布前检查（建议照抄）
 
 ```bash
 npm run build
+npm test
 ```
 
-## 📋 概念说明
+都通过再发布。
 
-### Title（标题）
+## 13. 当前交互规则（产品侧简述）
 
-- Title 是房间的显示名称，由主持人在创建房间时指定
-- 当前系统为**单房间模型**，不再暴露 RoomID 概念
+- 首次创建/加入会提示牢记 Ticket
+- 手动/自动再次进入不重复弹 Ticket 提醒
+- 主持人结束房间后，所有客户端收到关闭并清理本地状态
+- 提交内容支持重复提交，始终取最后一次
 
-### 单房间原则
-
-- 系统运行期间，**有且只有一个有效房间**存在
-- 当前已有房间时，新的创建请求会被拒绝（需先结束当前房间）
-- 房间结束（主持人点击"结束房间"或所有参与者离开）后，系统恢复无房间状态
-
-### 参与者与房间关系
-
-- 参与者与房间 ID **不存在任何直接关联**
-- 参与者仅与当前唯一有效的房间建立连接关系
-- 用户通过 Ticket 或首次加入方式进入当前房间
-
-### Ticket 系统
-
-- **首次加入**：填写昵称 + 上传头像 → 系统分配唯一 Ticket → 存储在 localStorage
-- **Ticket 复用**：有 Ticket 用户直接输入 Ticket 快速加入
-- Ticket 用于标识用户身份，支持断线重连
-
-## 🎯 用户流程
-
-### 主持人流程
-
-1. 访问首页 → 系统检测无房间 → 显示创建房间表单
-2. 填写 **Title（标题）**、**昵称**、**授权口令** → 创建房间
-3. 进入主持人控制台 → 控制 5 页演示内容
-4. 点击"结束房间"可关闭房间
-
-### 参与者流程
-
-#### 首次加入
-1. 访问首页 → 系统检测有房间 → 显示加入表单
-2. 填写 **昵称**、**上传头像** → 点击加入
-3. 系统分配 Ticket → 显示 Ticket 弹窗（请妥善保管）
-4. 进入会议室
-
-#### Ticket 加入
-1. 访问首页 → 系统检测有房间 → 显示加入表单
-2. 输入 **Ticket** → 点击加入
-3. 进入会议室
-
-## 📁 项目结构
-
-```
-open-meetup/
-├── client/                 # React 前端
-│   ├── src/
-│   │   ├── components/     # UI 组件
-│   │   │   ├── ContentViewer.tsx   # 内容查看器
-│   │   │   ├── HostControls.tsx     # 主持人控制按钮
-│   │   │   ├── JoinPage.tsx         # 加入房间页面
-│   │   │   ├── Lobby.tsx            # 房间创建页面
-│   │   │   ├── MeetingStage.tsx     # 演示舞台
-│   │   │   ├── SelfIntroPage.tsx   # 自我介绍页面
-│   │   │   └── ...
-│   │   ├── context/
-│   │   │   └── MeetingContext.tsx  # 会议状态管理
-│   │   ├── pages/
-│   │   │   ├── HostPage.tsx         # 主持人页面
-│   │   │   └── ParticipantPage.tsx  # 参与者页面
-│   │   ├── socket.ts               # Socket.IO 客户端
-│   │   ├── types.ts                # 类型定义
-│   │   └── App.tsx                 # 应用入口
-│   └── package.json
-├── server/                 # Node.js 后端
-│   ├── src/
-│   │   ├── index.ts       # HTTP 服务器入口
-│   │   ├── handlers.ts    # Socket 事件处理
-│   │   └── roomManager.ts # 房间管理逻辑
-│   └── package.json
-└── package.json            # 工作空间根配置
-```
-
-## 🔌 API 接口
-
-### GET /api/room/current
-
-获取当前房间状态。
-
-**响应**
-
-```json
-// 有房间
-{
-  "exists": true,
-  "title": "Open Meetup",
-  "status": "active",
-  "currentStep": 0,
-  "hostId": "user-xxx"
-}
-
-// 无房间
-{
-  "exists": false
-}
-```
-
-## 🔌 Socket 事件
-
-### 客户端 → 服务端
-
-| 事件 | 参数 | 说明 |
-|------|------|------|
-| `room:create` | `{ userName, title, password }` | 创建房间 |
-| `room:join` | `{ userName, ticket?, avatar? }` | 加入房间 |
-| `room:reconnect` | `{ userId, sessionId }` | 会话恢复 |
-| `room:leave` | `{}` | 离开房间 |
-| `room:end` | `{}` | 结束房间（仅主持人） |
-| `control:next` | `{}` | 下一页 |
-| `control:prev` | `{}` | 上一页 |
-| `control:end` | `{}` | 结束会议（保留房间） |
-| `page:update` | `{ pageIndex, content }` | 更新页面内容（仅主持人） |
-
-### 服务端 → 客户端
-
-| 事件 | 参数 | 说明 |
-|------|------|------|
-| `state:sync` | `RoomStateSync` | 房间状态同步 |
-| `room:user-joined` | `{ user }` | 用户加入 |
-| `room:user-left` | `{ user }` | 用户离开 |
-| `room:user-online` | `{ user }` | 用户上线 |
-| `room:user-offline` | `{ user }` | 用户离线 |
-| `room:closed` | `{ reason }` | 房间关闭 |
-
-## ⚙️ 配置说明
-
-### 服务端端口
-
-默认端口：`3001`
-
-修改方式：编辑 `server/src/index.ts`
-
-```typescript
-const PORT = process.env.PORT || 3001;
-```
-
-### 前端 API 地址
-
-默认：`http://localhost:3001`
-
-修改方式：编辑 `client/.env`
-
-```
-VITE_SERVER_URL=http://localhost:3001
-```
-
-### 授权口令
-
-默认：`12345678`
-
-修改方式：编辑 `server/src/config.ts`
-
-```typescript
-export const HOST_PASSWORD = process.env.HOST_PASSWORD || '12345678';
-```
-
-## 🐛 故障排除
-
-### "无法连接服务器"
-
-- 检查服务器是否启动（端口 3001）
-- 检查前端 `VITE_SERVER_URL` 配置
-
-### "Invalid user name / Invalid ticket"
-
-- 确认昵称不为空
-- Ticket 加入场景请确认 ticket 未输错且房间仍在有效期内
-
-### 页面显示异常
-
-- 尝试强制刷新：Cmd+Shift+R（Mac）或 Ctrl+Shift+R（Windows）
-- 清除浏览器缓存
-
-### 房间状态异常
-
-- 服务器重启会清空房间状态（内存）
-- 主持人离开会自动结束房间

@@ -7,7 +7,7 @@ import { ArrowLeftCircle, CheckCircle2, Copy, LogOut, Ticket, XCircle } from 'lu
 import { STORAGE_KEYS } from '../context/storage';
 
 export function HostPage() {
-  const { leaveRoom, endRoom, phase, returnToSetup, pages, currentStep, myTicket } = useMeeting();
+  const { leaveRoom, endRoom, phase, returnToSetup, pages, currentStep, myTicket, title } = useMeeting();
   const [setupFocusPageId, setSetupFocusPageId] = useState<string | null>(null);
   const [ticketConfirmed, setTicketConfirmed] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -71,7 +71,7 @@ export function HostPage() {
   }
 
   const showTicketReminder = Boolean(myTicket) && !ticketConfirmed;
-  const compactTicket = myTicket && ticketConfirmed ? (
+  const liveTicket = myTicket && ticketConfirmed ? (
     <div
       className="inline-flex h-7 max-w-[46vw] items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--panel-light)] px-2 text-[11px] font-semibold text-[var(--text)] md:max-w-[220px]"
       title={`我的 Ticket：${myTicket}`}
@@ -83,7 +83,7 @@ export function HostPage() {
 
   const liveTopActions = (
     <>
-      {compactTicket}
+      {liveTicket}
 
       <button
         type="button"
@@ -117,18 +117,16 @@ export function HostPage() {
 
   return (
     <div className="page-enter relative flex h-full w-full flex-col overflow-hidden">
-      {phase === 'setup' && compactTicket ? (
-        <div className="pointer-events-none absolute inset-x-0 top-2 z-30 px-3 md:px-4">
-          <div className="pointer-events-auto mx-auto flex w-full justify-end">
-            <div className="stage-topbar-surface flex h-10 items-center gap-2 px-1.5">
-              {compactTicket}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {phase === 'setup' ? (
-        <HostSetupBoard defaultSelectedPageId={setupFocusPageId} />
+        <HostSetupBoard
+          defaultSelectedPageId={setupFocusPageId}
+          roomTitle={title}
+          ticketCode={myTicket}
+          copiedTicket={copied}
+          onCopyTicket={() => void handleCopyTicket()}
+          onLeaveRoom={() => void leaveRoom()}
+          onEndRoom={() => void handleEndRoom()}
+        />
       ) : (
         <MeetingStage topActions={liveTopActions} />
       )}

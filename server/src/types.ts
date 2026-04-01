@@ -4,6 +4,14 @@ export type MeetingPhase = 'setup' | 'live';
 
 export type RoomCloseReason = 'HOST_LEFT' | 'HOST_ENDED' | 'HOST_TIMEOUT' | 'ROOM_EXPIRED';
 
+export interface ParticipantWorkSubmission {
+  url: string;
+  description: string;
+  updatedAt: number;
+}
+
+export type ParticipantWorks = Record<string, ParticipantWorkSubmission>;
+
 export interface RoomParticipant {
   userId: string;
   userName: string;
@@ -13,11 +21,8 @@ export interface RoomParticipant {
   socketId: string | null;
   online: boolean;
   lastSeenAt: number;
-  avatar?: string;
   ticket?: string;
-  workUrl?: string;
-  workDescription?: string;
-  workUpdatedAt?: number;
+  works?: ParticipantWorks;
 }
 
 export interface PublicParticipant {
@@ -27,11 +32,8 @@ export interface PublicParticipant {
   joinedAt: number;
   online: boolean;
   lastSeenAt: number;
-  avatar?: string;
   ticket?: string;
-  workUrl?: string;
-  workDescription?: string;
-  workUpdatedAt?: number;
+  works?: ParticipantWorks;
 }
 
 export interface PageContent {
@@ -39,18 +41,22 @@ export interface PageContent {
   content: string;
 }
 
-export type MeetingPageTheme = 1 | 2 | 3;
-export type MeetingPageKind = 'canvas' | 'selfIntro' | 'showcase';
+export type MeetingPageTheme = 1 | 3;
+export type PageSubmissionMode = 'url' | 'image';
+export type MeetingPageKind = 'canvas' | 'showcase';
 
 export interface MeetingPageDefinition {
   id: string;
   theme: MeetingPageTheme;
   kind: MeetingPageKind;
   title: string;
+  submissionMode?: PageSubmissionMode;
+  rankingEnabled?: boolean;
 }
 
 export interface Room {
   title: string;
+  participantLimit: number;
   hostId: string;
   participants: Map<string, RoomParticipant>;
   status: MeetingStatus;
@@ -72,13 +78,8 @@ export interface RoomStateSync {
   pages: MeetingPageDefinition[];
   userId: string;
   userRole: UserRole;
-  userName: string;
   sessionId: string;
-  avatar?: string;
   ticket?: string;
-  workUrl?: string;
-  workDescription?: string;
-  workUpdatedAt?: number;
   pageContents?: Array<[string, PageContent]>;
 }
 
@@ -100,7 +101,7 @@ export interface ErrorResponse {
     | 'NOT_AUTHENTICATED'
     | 'NOT_AUTHORIZED'
     | 'SESSION_EXPIRED'
-    | 'MEETING_NOT_ACTIVE'
+    | 'ROOM_NOT_ACTIVE'
     | 'USER_NOT_FOUND'
     | 'INTERNAL_ERROR';
 }

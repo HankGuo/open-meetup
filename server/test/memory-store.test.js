@@ -6,6 +6,7 @@ function buildRoom() {
   const now = Date.now();
   return {
     title: 'Demo Room',
+    participantLimit: 50,
     hostId: 'host-1',
     participants: new Map([
       [
@@ -19,7 +20,6 @@ function buildRoom() {
           socketId: 'socket-host',
           online: true,
           lastSeenAt: now,
-          avatar: undefined,
           ticket: 'HOST-AAAA1111',
         },
       ],

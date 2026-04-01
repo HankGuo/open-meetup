@@ -61,5 +61,6 @@ npm run sim:bulk-join -- --auto-create-room --end-room-on-exit
 
 ## 备注
 
-- 服务端单房间人数上限是 50（包含主持人），超出会出现 `ROOM_FULL`。
+- 服务端默认人数上限是 50（不含主持人），主持人可在创建房间时自定义；超出会出现 `ROOM_FULL`。
+- 如需压测远程机器，可用 `--server http://<ip>:3001` 指定地址。
 - 这是压测/演示工具，不建议在生产环境直接使用。

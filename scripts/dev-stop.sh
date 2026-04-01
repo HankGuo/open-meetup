@@ -4,7 +4,9 @@ set -u
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PID_FILE="$ROOT_DIR/.open-meetup-dev.pid"
-PORTS=(3001 5173)
+SERVER_PORT="${SERVER_PORT:-3001}"
+CLIENT_PORT="${CLIENT_PORT:-5173}"
+PORTS=("$SERVER_PORT" "$CLIENT_PORT")
 
 kill_pid() {
   local pid="$1"

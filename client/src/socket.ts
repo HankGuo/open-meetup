@@ -1,7 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 import { SessionCredentials } from './types';
+import { getServerBaseUrl } from './serverUrl';
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+const SERVER_URL = getServerBaseUrl();
 const ACK_TIMEOUT_MS = Number(import.meta.env.VITE_SOCKET_ACK_TIMEOUT_MS || 6000);
 
 let socket: Socket | null = null;

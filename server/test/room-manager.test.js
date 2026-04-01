@@ -20,10 +20,10 @@ function getHostIdentity(createResult) {
 function createPagesForSetup() {
   return [
     { id: 'page-canvas-a', theme: 1, kind: 'canvas', title: '自由画布 1' },
-    { id: 'page-intro-a', theme: 2, kind: 'selfIntro', title: '名牌广场 1' },
+    { id: 'page-showcase-image-a', theme: 3, kind: 'showcase', title: '图片陈列 1', submissionMode: 'image', rankingEnabled: true },
     { id: 'page-canvas-b', theme: 1, kind: 'canvas', title: '自由画布 2' },
     { id: 'page-canvas-c', theme: 1, kind: 'canvas', title: '自由画布 3' },
-    { id: 'page-showcase-a', theme: 3, kind: 'showcase', title: '作品陈列 1' },
+    { id: 'page-showcase-url-a', theme: 3, kind: 'showcase', title: '链接陈列 1', submissionMode: 'url', rankingEnabled: false },
     { id: 'page-canvas-d', theme: 1, kind: 'canvas', title: '自由画布 4' },
   ];
 }
@@ -39,6 +39,19 @@ test('new room should start with no preconfigured pages', () => {
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   assert.equal(created.data.pages.length, 0);
+});
+
+test('host can configure participant limit when creating room', () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host', 1);
+  assert.equal(created.success, true);
+
+  const firstJoin = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(firstJoin.success, true);
+
+  const secondJoin = manager.joinRoom('Bob', 'socket-b');
+  assert.equal(secondJoin.success, false);
+  assert.equal(secondJoin.error.code, 'ROOM_FULL');
 });
 
 test('nextStep should be capped at max page index', () => {
@@ -178,7 +191,7 @@ test('ticket join should restore existing participant instead of creating duplic
   const disconnected = manager.onSocketDisconnected('socket-a');
   assert.ok(disconnected);
 
-  const secondJoin = manager.joinRoom('', 'socket-b', undefined, ticket);
+  const secondJoin = manager.joinRoom('', 'socket-b', ticket);
   assert.equal(secondJoin.success, true);
   assert.equal(secondJoin.data.userId, firstUserId);
 
@@ -200,7 +213,7 @@ test('host ticket should restore host identity', () => {
   const disconnected = manager.onSocketDisconnected('socket-host');
   assert.ok(disconnected);
 
-  const rejoined = manager.joinRoom('', 'socket-host-2', undefined, hostTicket);
+  const rejoined = manager.joinRoom('', 'socket-host-2', hostTicket);
   assert.equal(rejoined.success, true);
   assert.equal(rejoined.data.userId, hostIdentity.userId);
   assert.equal(rejoined.data.userRole, 'host');
@@ -211,7 +224,7 @@ test('invalid ticket should be rejected', () => {
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
 
-  const result = manager.joinRoom('', 'socket-p', undefined, 'TKT-NOT-EXIST');
+  const result = manager.joinRoom('', 'socket-p', 'TKT-NOT-EXIST');
   assert.equal(result.success, false);
   assert.equal(result.error.code, 'INVALID_TICKET');
 });
@@ -237,6 +250,10 @@ test('participant can submit work and persist url/description fields', () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = seedPages(manager, hostIdentity);
+  const urlShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'url');
+  assert.ok(urlShowcasePage);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -246,19 +263,17 @@ test('participant can submit work and persist url/description fields', () => {
     sessionId: join.data.sessionId,
   };
 
-  const submit = manager.submitWork(participantIdentity, 'https://example.com/work', '我的 demo 作品');
+  const submit = manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work', '我的 demo 作品');
   assert.equal(submit.success, true);
-  assert.equal(submit.data.workUrl, 'https://example.com/work');
-  assert.equal(submit.data.workDescription, '我的 demo 作品');
-  assert.ok(typeof submit.data.workUpdatedAt === 'number');
 
   const snapshot = manager.getPublicRoomSnapshot();
   assert.equal(snapshot.success, true);
 
   const alice = snapshot.data.participants.find((participant) => participant.userId === join.data.userId);
   assert.ok(alice);
-  assert.equal(alice.workUrl, 'https://example.com/work');
-  assert.equal(alice.workDescription, '我的 demo 作品');
+  assert.equal(alice.works[urlShowcasePage.id].url, 'https://example.com/work');
+  assert.equal(alice.works[urlShowcasePage.id].description, '我的 demo 作品');
+  assert.ok(typeof alice.works[urlShowcasePage.id].updatedAt === 'number');
 });
 
 test('host cannot submit work as participant', () => {
@@ -266,15 +281,19 @@ test('host cannot submit work as participant', () => {
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   const hostIdentity = getHostIdentity(created);
 
-  const submit = manager.submitWork(hostIdentity, 'https://example.com/work', 'host try');
+  const submit = manager.submitWork(hostIdentity, 'page-showcase-url-a', 'https://example.com/work', 'host try');
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'NOT_AUTHORIZED');
 });
 
-test('submit work should reject non-http urls', () => {
+test('submit work should reject non-http urls on url-mode page', () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = seedPages(manager, hostIdentity);
+  const urlShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'url');
+  assert.ok(urlShowcasePage);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -284,7 +303,67 @@ test('submit work should reject non-http urls', () => {
     sessionId: join.data.sessionId,
   };
 
-  const submit = manager.submitWork(participantIdentity, 'javascript:alert(1)', 'bad');
+  const submit = manager.submitWork(participantIdentity, urlShowcasePage.id, 'javascript:alert(1)', 'bad');
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'BAD_REQUEST');
+});
+
+test('submit work should reject non-image payload on image-mode page', () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submit = manager.submitWork(participantIdentity, imageShowcasePage.id, 'https://example.com/not-image', 'bad');
+  assert.equal(submit.success, false);
+  assert.equal(submit.error.code, 'BAD_REQUEST');
+});
+
+test('submissions should be isolated by showcase page id', () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  const urlShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'url');
+  assert.ok(imageShowcasePage);
+  assert.ok(urlShowcasePage);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submitUrl = manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work-a', 'URL 作品');
+  assert.equal(submitUrl.success, true);
+  const submitImage = manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    '图片作品',
+  );
+  assert.equal(submitImage.success, true);
+
+  const snapshot = manager.getPublicRoomSnapshot();
+  assert.equal(snapshot.success, true);
+  const alice = snapshot.data.participants.find((participant) => participant.userId === join.data.userId);
+  assert.ok(alice);
+  assert.equal(alice.works[urlShowcasePage.id].url, 'https://example.com/work-a');
+  assert.equal(alice.works[urlShowcasePage.id].description, 'URL 作品');
+  assert.equal(alice.works[imageShowcasePage.id].description, '图片作品');
 });

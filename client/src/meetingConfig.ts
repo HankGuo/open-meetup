@@ -1,31 +1,38 @@
-import { MeetingPageDefinition, MeetingPageKind } from './types';
+import { MeetingPageDefinition, MeetingPageKind, PageSubmissionMode } from './types';
 
 export function createDefaultMeetingPages(): MeetingPageDefinition[] {
   return [];
 }
 
-export function createNewPage(kind: MeetingPageKind, orderNumber: number): MeetingPageDefinition {
-  if (kind === 'selfIntro') {
-    return {
-      id: createPageId(),
-      kind: 'selfIntro',
-      theme: 2,
-      title: `自我介绍名牌广场 ${orderNumber}`,
-    };
-  }
+interface PageCreateOptions {
+  submissionMode?: PageSubmissionMode;
+  rankingEnabled?: boolean;
+  title?: string;
+}
+
+export function createNewPage(
+  kind: MeetingPageKind,
+  orderNumber: number,
+  options?: PageCreateOptions,
+): MeetingPageDefinition {
   if (kind === 'showcase') {
+    const submissionMode = options?.submissionMode ?? 'url';
+    const rankingEnabled = options?.rankingEnabled ?? true;
+    const customTitle = options?.title?.trim().slice(0, 64);
     return {
       id: createPageId(),
       kind: 'showcase',
       theme: 3,
-      title: `作品展示陈列区 ${orderNumber}`,
+      title: customTitle || `互动页 ${orderNumber}`,
+      submissionMode,
+      rankingEnabled,
     };
   }
   return {
     id: createPageId(),
     kind: 'canvas',
     theme: 1,
-    title: `自由画布 ${orderNumber}`,
+    title: options?.title?.trim().slice(0, 64) || `自由画布 ${orderNumber}`,
   };
 }
 

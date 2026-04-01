@@ -7,6 +7,8 @@ import { getInitialExcalidrawData } from '../excalidrawScene';
 interface ContentViewerProps {
   pageId: string;
   pageIndex: number;
+  pageTitle: string;
+  totalPages: number;
 }
 
 const ExcalidrawCanvas = lazy(() =>
@@ -20,7 +22,7 @@ const LOCKED_SCROLL_EPSILON = 0.5;
 const LOCKED_ZOOM_VALUE = 1;
 const MIN_VIEWPORT_SIZE = 1;
 
-export function ContentViewer({ pageId, pageIndex }: ContentViewerProps) {
+export function ContentViewer({ pageId, pageIndex, pageTitle, totalPages }: ContentViewerProps) {
   const { pageContents } = useMeeting();
   const [sceneVersion, setSceneVersion] = useState(0);
   const lockingSceneRef = useRef(false);
@@ -40,16 +42,17 @@ export function ContentViewer({ pageId, pageIndex }: ContentViewerProps) {
   return (
     <div className="h-full w-full p-3 md:p-4">
       <section className="playback-excalidraw relative h-full w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[linear-gradient(170deg,var(--panel-light),var(--panel-soft))] shadow-[var(--shadow-1)]">
-        <div className="pointer-events-none absolute right-3 top-3 z-10">
-          <span className="rounded-full border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1 text-xs font-medium text-[var(--text-soft)]">
-            第 {pageIndex + 1} 页
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[78%] items-center gap-2">
+          <span className="status-pill shrink-0">第 {pageIndex + 1} / {totalPages} 页</span>
+          <span className="status-pill truncate" title={pageTitle}>
+            {pageTitle}
           </span>
         </div>
 
         {!hasSavedContent ? (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
             <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--panel)] px-4 py-2 text-sm text-[var(--text-soft)]">
-              主持人尚未在本页放置内容
+              主持人尚未在本页配置内容
             </div>
           </div>
         ) : null}

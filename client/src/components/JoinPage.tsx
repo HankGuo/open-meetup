@@ -1,18 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useMeeting } from '../context/MeetingContext';
-import { CheckCircle2, Ticket, Upload, User, Wifi, WifiOff } from 'lucide-react';
+import { CheckCircle2, Ticket, User, Wifi, WifiOff } from 'lucide-react';
 import { STORAGE_KEYS } from '../context/storage';
-
-interface TicketIdentity {
-  role: 'host' | 'participant';
-  userName: string;
-  userId: string;
-}
+import { buildServerApiUrl } from '../serverUrl';
 
 interface TicketCheckResult {
   valid: boolean;
   error?: string;
-  identity?: TicketIdentity;
+  identity?: { role: 'host' | 'participant' };
 }
 
 export function JoinPage() {
@@ -20,9 +15,7 @@ export function JoinPage() {
   const [mode, setMode] = useState<'ticket' | 'form'>('form');
   const [userName, setUserName] = useState('');
   const [ticket, setTicket] = useState('');
-  const [avatar, setAvatar] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [autoJoinTicket, setAutoJoinTicket] = useState('');
@@ -43,9 +36,7 @@ export function JoinPage() {
 
   async function verifyTicket(ticketToVerify: string): Promise<TicketCheckResult> {
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'}/api/room/ticket-check?ticket=${encodeURIComponent(ticketToVerify)}`
-      );
+      const response = await fetch(`${buildServerApiUrl('/api/room/ticket-check')}?ticket=${encodeURIComponent(ticketToVerify)}`);
       if (!response.ok) {
         const failed = (await response.json()) as TicketCheckResult;
         return {
@@ -57,19 +48,6 @@ export function JoinPage() {
       return data;
     } catch {
       return { valid: false, error: '验证失败，请稍后重试' };
-    }
-  }
-
-  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        setAvatar(dataUrl);
-        setPreviewUrl(dataUrl);
-      };
-      reader.readAsDataURL(file);
     }
   }
 
@@ -100,7 +78,7 @@ export function JoinPage() {
     }
 
     setLoading(true);
-    const success = await joinRoom('', normalizedTicket, undefined);
+    const success = await joinRoom('', normalizedTicket);
     setLoading(false);
     return success;
   }
@@ -134,16 +112,9 @@ export function JoinPage() {
       alert('请输入您的昵称');
       return;
     }
-    if (!previewUrl) {
-      alert('请上传您的电子名片');
-      return;
-    }
     setLoading(true);
-    const success = await joinRoom(userName.trim(), undefined, avatar);
+    await joinRoom(userName.trim());
     setLoading(false);
-    if (!success) {
-      // Error is already set in context
-    }
   }
 
   return (
@@ -151,7 +122,7 @@ export function JoinPage() {
       <section className="glass-panel w-full max-w-4xl p-4 md:p-7">
         <div className="grid gap-6 md:grid-cols-[1.05fr_1fr]">
           <div className="app-card p-5 md:p-6">
-            <h1 className="text-3xl font-bold text-[var(--text)]">加入会议</h1>
+            <h1 className="text-3xl font-bold text-[var(--text)]">加入房间</h1>
             <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">
               支持首次加入与 Ticket 两种模式；Ticket 与身份绑定，更换浏览器或使用隐私模式时可继续使用。
             </p>
@@ -241,25 +212,6 @@ export function JoinPage() {
                     onChange={(e) => setUserName(e.target.value)}
                   />
                 </label>
-
-                <div>
-                  <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">电子名片</span>
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)]">
-                      {previewUrl ? (
-                        <img src={previewUrl} alt="Avatar" className="h-full w-full object-cover" />
-                      ) : (
-                        <Upload className="h-7 w-7 text-[var(--text-soft)]" />
-                      )}
-                    </div>
-                    <label className="min-w-0 flex-1">
-                      <input type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
-                      <span className="btn-base btn-secondary w-full cursor-pointer">
-                        上传头像
-                      </span>
-                    </label>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -279,7 +231,7 @@ export function JoinPage() {
               ) : (
                 <>
                   <CheckCircle2 className="h-4 w-4" />
-                  加入会议
+                  加入房间
                 </>
               )}
             </button>

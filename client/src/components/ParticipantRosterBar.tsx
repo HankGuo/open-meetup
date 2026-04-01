@@ -232,10 +232,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
 function AvatarCircle({ participant, sizeClassName }: { participant: User | null; sizeClassName: string }) {
   const fallbackText = getFallbackAvatarText(participant);
 
-  if (participant?.avatar) {
-    return <img src={participant.avatar} alt={participant.userName} className={`${sizeClassName} rounded-full object-cover`} />;
-  }
-
   return (
     <div
       className={`${sizeClassName} avatar-fallback text-[11px] font-semibold`}
