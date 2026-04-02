@@ -3,6 +3,7 @@ import { RoomManager } from './roomManager';
 import { ErrorResponse, MeetingPageDefinition, RoomCloseReason, SocketIdentity, SocketResult } from './types';
 
 type AckFn<T = unknown> = (response: T) => void;
+const ACTIVE_ROOM_CHANNEL = 'room:active';
 
 interface CreateRoomPayload {
   userName: string;
@@ -107,11 +108,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
           userId: result.data.userId,
           sessionId: result.data.sessionId,
         });
-
-        const me = result.data.participants.find((participant) => participant.userId === result.data.userId);
-        if (me) {
-          socket.broadcast.emit('room:user-joined', { user: me });
-        }
         broadcastRoomState(io, roomManager);
 
         ack(callback, result);
@@ -138,11 +134,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
           userId: result.data.userId,
           sessionId: result.data.sessionId,
         });
-
-        const me = result.data.participants.find((participant) => participant.userId === result.data.userId);
-        if (me) {
-          socket.broadcast.emit('room:user-online', { user: me });
-        }
         broadcastRoomState(io, roomManager);
 
         ack(callback, result);
@@ -152,7 +143,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       }
     });
 
-    socket.on('room:leave', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
+    socket.on('room:leave', async (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
       try {
         const identity = getSocketIdentity(socket);
         if (!identity) {
@@ -160,7 +151,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
           return;
         }
 
-        const result = roomManager.leaveRoom(identity);
+        const result = await roomManager.leaveRoom(identity);
         if (!result.ok) {
           ack(callback, { success: false, error: result.error });
           return;
@@ -169,9 +160,9 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         clearSocketIdentity(socket);
 
         if (result.roomClosed) {
-          io.emit('room:closed', { reason: result.reason });
+          emitRoomClosed(io, result.reason);
+          clearActiveRoomChannel(io);
         } else {
-          socket.broadcast.emit('room:user-left', { user: result.leftUser });
           broadcastRoomState(io, roomManager);
         }
 
@@ -185,7 +176,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       }
     });
 
-    socket.on('room:end', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
+    socket.on('room:end', async (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
       try {
         const identity = getSocketIdentity(socket);
         if (!identity) {
@@ -193,14 +184,15 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
           return;
         }
 
-        const result = roomManager.forceEndRoom(identity);
+        const result = await roomManager.forceEndRoom(identity);
         if (!result.success) {
           ack(callback, result);
           return;
         }
 
         clearSocketIdentity(socket);
-        io.emit('room:closed', { reason: 'HOST_ENDED' });
+        emitRoomClosed(io, 'HOST_ENDED');
+        clearActiveRoomChannel(io);
 
         ack(callback, result);
       } catch (error) {
@@ -222,9 +214,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.emit('control:next', {
-        currentStep: result.data.currentStep,
-      });
       broadcastRoomState(io, roomManager);
       ack(callback, { success: true, data: null });
     });
@@ -242,9 +231,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.emit('control:prev', {
-        currentStep: result.data.currentStep,
-      });
       broadcastRoomState(io, roomManager);
       ack(callback, { success: true, data: null });
     });
@@ -262,10 +248,6 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.emit('control:start-live', {
-        phase: result.data.phase,
-        currentStep: result.data.currentStep,
-      });
       broadcastRoomState(io, roomManager);
       ack(callback, { success: true, data: null });
     });
@@ -283,37 +265,30 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.emit('control:return-setup', {
-        phase: result.data.phase,
-        currentStep: result.data.currentStep,
-      });
       broadcastRoomState(io, roomManager);
       ack(callback, { success: true, data: null });
     });
 
-    socket.on('pages:update', (payload: PagesUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
+    socket.on('pages:update', async (payload: PagesUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
+      try {
+        const identity = getSocketIdentity(socket);
+        if (!identity) {
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+          return;
+        }
 
-      const result = roomManager.updatePages(identity, payload?.pages ?? []);
-      if (!result.success) {
+        const result = await roomManager.updatePages(identity, payload?.pages ?? []);
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
+
+        broadcastRoomState(io, roomManager);
         ack(callback, result);
-        return;
+      } catch (error) {
+        console.error('[Socket] pages:update error:', error);
+        ack(callback, failure('Failed to update pages', 'INTERNAL_ERROR'));
       }
-
-      io.emit('state:sync', {
-        participants: result.data.participants,
-        status: result.data.status,
-        phase: result.data.phase,
-        currentStep: result.data.currentStep,
-        hostId: result.data.hostId,
-        pages: result.data.pages,
-        pageContents: result.data.pageContents,
-      });
-      ack(callback, result);
     });
 
     socket.on('page:update', (payload: PageUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
@@ -334,33 +309,35 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      io.emit('state:sync', {
-        participants: result.data.participants,
-        status: result.data.status,
-        phase: result.data.phase,
-        currentStep: result.data.currentStep,
-        hostId: result.data.hostId,
-        pages: result.data.pages,
-        pageContents: result.data.pageContents,
-      });
+      broadcastRoomState(io, roomManager);
       ack(callback, result);
     });
 
-    socket.on('work:submit', (payload: WorkSubmitPayload, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
+    socket.on('work:submit', async (payload: WorkSubmitPayload, callback?: AckFn<SocketResult<unknown>>) => {
+      try {
+        const identity = getSocketIdentity(socket);
+        if (!identity) {
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+          return;
+        }
 
-      const result = roomManager.submitWork(identity, payload?.pageId ?? '', payload?.url ?? '', payload?.description ?? '');
-      if (!result.success) {
+        const result = await roomManager.submitWork(
+          identity,
+          payload?.pageId ?? '',
+          payload?.url ?? '',
+          payload?.description ?? '',
+        );
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
+
+        broadcastRoomState(io, roomManager);
         ack(callback, result);
-        return;
+      } catch (error) {
+        console.error('[Socket] work:submit error:', error);
+        ack(callback, failure('Failed to submit work', 'INTERNAL_ERROR'));
       }
-
-      broadcastRoomState(io, roomManager);
-      ack(callback, result);
     });
 
     socket.on('disconnect', (reason) => {
@@ -371,14 +348,27 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         return;
       }
 
-      socket.broadcast.emit('room:user-offline', { user: disconnected.user });
       broadcastRoomState(io, roomManager);
     });
   });
 }
 
 export function emitRoomClosed(io: Server, reason: RoomCloseReason) {
-  io.emit('room:closed', { reason });
+  io.to(ACTIVE_ROOM_CHANNEL).emit('room:closed', { reason });
+}
+
+export function clearActiveRoomChannel(io: Server) {
+  const roomSockets = io.sockets.adapter.rooms.get(ACTIVE_ROOM_CHANNEL);
+  if (!roomSockets) {
+    return;
+  }
+  for (const socketId of roomSockets) {
+    const roomSocket = io.sockets.sockets.get(socketId);
+    if (!roomSocket) {
+      continue;
+    }
+    clearSocketIdentity(roomSocket);
+  }
 }
 
 function getData(socket: Socket): SocketData {
@@ -398,10 +388,12 @@ function getSocketIdentity(socket: Socket): SocketIdentity | null {
 
 function setSocketIdentity(socket: Socket, identity: SocketIdentity) {
   getData(socket).identity = identity;
+  socket.join(ACTIVE_ROOM_CHANNEL);
 }
 
 function clearSocketIdentity(socket: Socket) {
   getData(socket).identity = undefined;
+  socket.leave(ACTIVE_ROOM_CHANNEL);
 }
 
 function ack<T>(callback: AckFn<T> | undefined, payload: T) {
@@ -418,12 +410,13 @@ function failure(message: string, code: ErrorResponse['code']): SocketResult<nev
 }
 
 function broadcastRoomState(io: Server, roomManager: RoomManager) {
+  pruneActiveRoomChannel(io, roomManager);
   const snapshot = roomManager.getPublicRoomSnapshot();
   if (!snapshot.success) {
     return;
   }
 
-  io.emit('state:sync', {
+  io.to(ACTIVE_ROOM_CHANNEL).emit('state:sync', {
     participants: snapshot.data.participants,
     status: snapshot.data.status,
     phase: snapshot.data.phase,
@@ -432,6 +425,23 @@ function broadcastRoomState(io: Server, roomManager: RoomManager) {
     pages: snapshot.data.pages,
     pageContents: snapshot.data.pageContents,
   });
+}
+
+function pruneActiveRoomChannel(io: Server, roomManager: RoomManager) {
+  const roomSockets = io.sockets.adapter.rooms.get(ACTIVE_ROOM_CHANNEL);
+  if (!roomSockets) {
+    return;
+  }
+  for (const socketId of roomSockets) {
+    const roomSocket = io.sockets.sockets.get(socketId);
+    if (!roomSocket) {
+      continue;
+    }
+    const identity = getSocketIdentity(roomSocket);
+    if (!roomManager.isIdentityAuthorized(identity)) {
+      clearSocketIdentity(roomSocket);
+    }
+  }
 }
 
 interface SocketData {

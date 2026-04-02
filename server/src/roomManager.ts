@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import path from 'path';
 import {
   ErrorResponse,
   MeetingStatus,
@@ -25,13 +26,18 @@ import {
 } from './config';
 import { MemoryStore, RoomStore } from './store';
 import { createDefaultMeetingPages, MAX_MEETING_PAGES } from './meetingConfig';
+import { AssetStorage, createAssetStorage } from './assetStorage';
 
 const DISCONNECT_GRACE_MS = 120_000;
 const PARTICIPANT_TICKET_PREFIX = 'TKT-';
-const PARTICIPANT_TICKET_RANDOM_LENGTH = 8;
-const MAX_WORK_URL_LENGTH = 2_000_000;
+const PARTICIPANT_TICKET_RANDOM_LENGTH = 12;
+const HOST_TICKET_RANDOM_LENGTH = 12;
+const MAX_WORK_URL_LENGTH = 2_048;
+const MAX_IMAGE_DATA_URL_LENGTH = 4_000_000;
+const MAX_IMAGE_UPLOAD_BYTES = 2_000_000;
 const MAX_WORK_DESCRIPTION_LENGTH = 120;
 const MAX_PAGE_TITLE_LENGTH = 64;
+const UPLOAD_URL_PREFIX = '/uploads';
 
 type AuthContext = { room: Room; participant: RoomParticipant };
 
@@ -51,7 +57,6 @@ type LeaveResult =
   | {
       ok: true;
       roomClosed: false;
-      leftUser: PublicParticipant;
     }
   | {
       ok: true;
@@ -71,9 +76,11 @@ interface CleanupResult {
 export class RoomManager {
   private socketToIdentity: Map<string, SocketIdentity> = new Map();
   private readonly store: RoomStore;
+  private readonly assetStorage: AssetStorage;
 
-  constructor(store: RoomStore = new MemoryStore()) {
-    this.store = store;
+  constructor(store?: RoomStore, assetStorage?: AssetStorage) {
+    this.store = store ?? new MemoryStore();
+    this.assetStorage = assetStorage ?? createAssetStorage();
   }
 
   getActiveRoomCount(): number {
@@ -128,10 +135,11 @@ export class RoomManager {
       socketId,
       online: true,
       lastSeenAt: now,
-      ticket: 'HOST-' + randomUUID().substring(0, 8).toUpperCase(),
+      ticket: this.generateHostTicket(),
     };
 
     const activeRoom: Room = {
+      id: randomUUID(),
       title: roomTitle,
       participantLimit,
       hostId: host.userId,
@@ -285,7 +293,7 @@ export class RoomManager {
     };
   }
 
-  leaveRoom(identity: SocketIdentity): LeaveResult {
+  async leaveRoom(identity: SocketIdentity): Promise<LeaveResult> {
     const auth = this.authorize(identity);
     if (!auth) {
       return { ok: false, error: this.error('Not authenticated', 'NOT_AUTHENTICATED') };
@@ -293,7 +301,7 @@ export class RoomManager {
 
     const { room, participant } = auth;
     const now = Date.now();
-    const leftUser = this.toPublicParticipant(participant);
+    const removedUploadUrls = this.collectManagedUploadUrlsFromParticipantWorks(participant.works, room.id);
 
     room.participants.delete(participant.userId);
     room.updatedAt = now;
@@ -303,7 +311,7 @@ export class RoomManager {
     }
 
     if (participant.role === 'host') {
-      this.closeRoom();
+      await this.closeRoom();
       return {
         ok: true,
         roomClosed: true,
@@ -312,7 +320,7 @@ export class RoomManager {
     }
 
     if (room.participants.size === 0) {
-      this.closeRoom();
+      await this.closeRoom();
       return {
         ok: true,
         roomClosed: true,
@@ -320,12 +328,12 @@ export class RoomManager {
       };
     }
 
+    await this.cleanupUploadUrls(room, removedUploadUrls);
     this.store.saveRoom(room);
 
     return {
       ok: true,
       roomClosed: false,
-      leftUser,
     };
   }
 
@@ -468,7 +476,7 @@ export class RoomManager {
     };
   }
 
-  updatePages(identity: SocketIdentity, pagesInput: MeetingPageDefinition[]): SocketResult<RoomStateSync> {
+  async updatePages(identity: SocketIdentity, pagesInput: MeetingPageDefinition[]): Promise<SocketResult<RoomStateSync>> {
     const auth = this.authorize(identity);
     if (!auth) {
       return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
@@ -505,6 +513,7 @@ export class RoomManager {
         .filter((page) => page.kind === 'showcase')
         .map((page) => [page.id, page.submissionMode ?? 'url'] as const),
     );
+    const removedUploadUrls = new Set<string>();
     for (const participant of auth.room.participants.values()) {
       if (!participant.works) {
         continue;
@@ -513,6 +522,10 @@ export class RoomManager {
         const submission = participant.works[submissionPageId];
         const mode = showcaseModeByPageId.get(submissionPageId);
         if (!validShowcaseIds.has(submissionPageId) || !mode || !isValidSubmissionForMode(submission, mode)) {
+          const managedUpload = this.normalizeManagedUploadUrlForRoom(submission?.url, auth.room.id);
+          if (managedUpload) {
+            removedUploadUrls.add(managedUpload);
+          }
           delete participant.works[submissionPageId];
         }
       }
@@ -520,6 +533,7 @@ export class RoomManager {
         delete participant.works;
       }
     }
+    await this.cleanupUploadUrls(auth.room, removedUploadUrls);
 
     const maxStepIndex = Math.max(0, normalizedPages.length - 1);
     if (auth.room.currentStep > maxStepIndex) {
@@ -535,7 +549,7 @@ export class RoomManager {
     };
   }
 
-  forceEndRoom(identity: SocketIdentity): SocketResult<{ closed: boolean }> {
+  async forceEndRoom(identity: SocketIdentity): Promise<SocketResult<{ closed: boolean }>> {
     const auth = this.authorize(identity);
     if (!auth) {
       return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
@@ -544,7 +558,7 @@ export class RoomManager {
       return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
     }
 
-    this.closeRoom();
+    await this.closeRoom();
 
     return {
       success: true,
@@ -552,13 +566,21 @@ export class RoomManager {
     };
   }
 
-  submitWork(identity: SocketIdentity, pageIdInput: string, workUrlInput: string, workDescriptionInput: string): WorkSubmitResult {
+  async submitWork(
+    identity: SocketIdentity,
+    pageIdInput: string,
+    workUrlInput: string,
+    workDescriptionInput: string,
+  ): Promise<WorkSubmitResult> {
     const auth = this.authorize(identity);
     if (!auth) {
       return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'participant') {
       return this.fail('Only participant can submit work', 'NOT_AUTHORIZED');
+    }
+    if (auth.room.phase !== 'live') {
+      return this.fail('仅播放阶段允许提交互动内容', 'BAD_REQUEST');
     }
 
     const pageId = sanitizePageId(pageIdInput);
@@ -571,19 +593,23 @@ export class RoomManager {
       return this.fail('当前页面不支持提交内容', 'BAD_REQUEST');
     }
 
+    const workDescription = sanitizeWorkDescription(workDescriptionInput);
+    if (!workDescription) {
+      return this.fail('请填写一句话作品描述（最多 120 字）', 'BAD_REQUEST');
+    }
+
     const submissionMode = targetPage.submissionMode ?? 'url';
-    const workUrl = submissionMode === 'image' ? sanitizeImageWorkUrl(workUrlInput) : sanitizeHttpWorkUrl(workUrlInput);
+    const workUrl =
+      submissionMode === 'image'
+        ? await this.persistImageSubmission(auth.room, workUrlInput)
+        : sanitizeHttpWorkUrl(workUrlInput);
     if (!workUrl) {
       return this.fail(
         submissionMode === 'image' ? '请上传有效图片后再提交' : '请填写有效的 http/https 作品链接',
         'BAD_REQUEST',
       );
     }
-
-    const workDescription = sanitizeWorkDescription(workDescriptionInput);
-    if (!workDescription) {
-      return this.fail('请填写一句话作品描述（最多 120 字）', 'BAD_REQUEST');
-    }
+    const previousSubmission = auth.participant.works?.[pageId];
 
     const now = Date.now();
     auth.participant.works = auth.participant.works ?? {};
@@ -592,6 +618,9 @@ export class RoomManager {
       description: workDescription,
       updatedAt: now,
     };
+    if (previousSubmission && previousSubmission.url !== workUrl) {
+      await this.cleanupUploadUrls(auth.room, [previousSubmission.url]);
+    }
     auth.room.updatedAt = now;
     this.store.saveRoom(auth.room);
 
@@ -606,24 +635,23 @@ export class RoomManager {
     if (!auth) {
       return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
     }
-    const room = this.getActiveRoom();
     return {
       success: true,
-      data: this.toRoomStateSync(room!, auth.participant),
+      data: this.toRoomStateSync(auth.room, auth.participant),
     };
   }
 
-  onSocketDisconnected(socketId: string): { user: PublicParticipant } | null {
+  onSocketDisconnected(socketId: string): boolean {
     const identity = this.socketToIdentity.get(socketId);
     this.socketToIdentity.delete(socketId);
 
     const room = this.getActiveRoom();
     if (!room || !identity) {
-      return null;
+      return false;
     }
     const participant = room.participants.get(identity.userId);
     if (!participant || participant.sessionId !== identity.sessionId) {
-      return null;
+      return false;
     }
 
     participant.socketId = null;
@@ -632,14 +660,13 @@ export class RoomManager {
     room.updatedAt = participant.lastSeenAt;
     this.store.saveRoom(room);
 
-    return {
-      user: this.toPublicParticipant(participant),
-    };
+    return true;
   }
 
-  cleanupExpired(now = Date.now()): CleanupResult {
+  async cleanupExpired(now = Date.now()): Promise<CleanupResult> {
     const closedRooms: Array<{ reason: RoomCloseReason }> = [];
     const removedParticipants: PublicParticipant[] = [];
+    const removedUploadUrls = new Set<string>();
 
     const room = this.getActiveRoom();
     if (!room) {
@@ -655,10 +682,14 @@ export class RoomManager {
 
     for (const participant of offlineUsers) {
       removedParticipants.push(this.toPublicParticipant(participant));
+      for (const uploadUrl of this.collectManagedUploadUrlsFromParticipantWorks(participant.works, room.id)) {
+        removedUploadUrls.add(uploadUrl);
+      }
       room.participants.delete(participant.userId);
     }
 
     if (offlineUsers.length > 0) {
+      await this.cleanupUploadUrls(room, removedUploadUrls);
       room.updatedAt = now;
       this.store.saveRoom(room);
     }
@@ -666,10 +697,10 @@ export class RoomManager {
     const hostAlive = room.participants.has(room.hostId);
     if (!hostAlive) {
       closedRooms.push({ reason: 'HOST_TIMEOUT' });
-      this.closeRoom();
+      await this.closeRoom();
     } else if (room.participants.size === 0) {
       closedRooms.push({ reason: 'ROOM_EXPIRED' });
-      this.closeRoom();
+      await this.closeRoom();
     }
 
     return { closedRooms, removedParticipants };
@@ -698,6 +729,26 @@ export class RoomManager {
     };
   }
 
+  checkTicket(ticketInput: string): { valid: boolean } {
+    const room = this.getActiveRoom();
+    if (!room) {
+      return { valid: false };
+    }
+    const normalizedTicket = normalizeTicket(ticketInput);
+    if (!normalizedTicket) {
+      return { valid: false };
+    }
+    const participant = this.findParticipantByTicket(room, normalizedTicket);
+    if (!participant) {
+      return { valid: false };
+    }
+    return { valid: true };
+  }
+
+  isIdentityAuthorized(identity: SocketIdentity | null | undefined): boolean {
+    return this.authorize(identity) != null;
+  }
+
   private authorize(identity: SocketIdentity | null | undefined): AuthContext | null {
     if (!identity) {
       return null;
@@ -716,13 +767,14 @@ export class RoomManager {
     return { room, participant };
   }
 
-  private closeRoom(): void {
+  private async closeRoom(): Promise<void> {
+    const room = this.getActiveRoom();
     for (const [socketId, id] of this.socketToIdentity.entries()) {
-      const room = this.getActiveRoom();
       if (room?.participants.has(id.userId)) {
         this.socketToIdentity.delete(socketId);
       }
     }
+    await this.removeRoomUploads(room?.id);
     this.store.clearAll();
   }
 
@@ -777,6 +829,133 @@ export class RoomManager {
         .slice(0, PARTICIPANT_TICKET_RANDOM_LENGTH)
         .toUpperCase()
     );
+  }
+
+  private generateHostTicket(): string {
+    return 'HOST-' + randomUUID().replace(/-/g, '').slice(0, HOST_TICKET_RANDOM_LENGTH).toUpperCase();
+  }
+
+  private async persistImageSubmission(room: Room, rawInput: string): Promise<string | null> {
+    const parsed = parseBase64ImageDataUrl(rawInput);
+    if (!parsed || parsed.byteLength > MAX_IMAGE_UPLOAD_BYTES) {
+      return null;
+    }
+
+    const extension = resolveImageExtensionByMime(parsed.mimeType);
+    if (!extension) {
+      return null;
+    }
+
+    const fileName = `${Date.now().toString(36)}-${randomUUID().replace(/-/g, '').slice(0, 10)}${extension}`;
+
+    try {
+      await this.assetStorage.putObject({
+        roomId: room.id,
+        fileName,
+        buffer: parsed.buffer,
+        contentType: parsed.mimeType,
+      });
+    } catch {
+      return null;
+    }
+
+    return `${UPLOAD_URL_PREFIX}/${room.id}/${fileName}`;
+  }
+
+  private async removeRoomUploads(roomId: string | undefined): Promise<void> {
+    if (!roomId) {
+      return;
+    }
+    try {
+      await this.assetStorage.deleteRoom(roomId);
+    } catch {
+      // 忽略清理失败，避免影响房间关闭流程
+    }
+  }
+
+  private async cleanupUploadUrls(room: Room, uploadUrls: Iterable<string>): Promise<void> {
+    const candidates = new Set<string>();
+    for (const uploadUrl of uploadUrls) {
+      const normalized = this.normalizeManagedUploadUrlForRoom(uploadUrl, room.id);
+      if (normalized) {
+        candidates.add(normalized);
+      }
+    }
+
+    for (const uploadUrl of candidates) {
+      if (this.isManagedUploadUrlStillReferenced(room, uploadUrl)) {
+        continue;
+      }
+      await this.removeManagedUploadByUrl(uploadUrl);
+    }
+  }
+
+  private isManagedUploadUrlStillReferenced(room: Room, normalizedUploadUrl: string): boolean {
+    for (const participant of room.participants.values()) {
+      if (!participant.works) {
+        continue;
+      }
+      for (const submission of Object.values(participant.works)) {
+        const normalized = this.normalizeManagedUploadUrlForRoom(submission?.url, room.id);
+        if (normalized === normalizedUploadUrl) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private collectManagedUploadUrlsFromParticipantWorks(
+    works: ParticipantWorks | undefined,
+    roomId: string,
+  ): string[] {
+    if (!works) {
+      return [];
+    }
+    const uploadUrls: string[] = [];
+    for (const submission of Object.values(works)) {
+      const normalized = this.normalizeManagedUploadUrlForRoom(submission?.url, roomId);
+      if (normalized) {
+        uploadUrls.push(normalized);
+      }
+    }
+    return uploadUrls;
+  }
+
+  private normalizeManagedUploadUrlForRoom(uploadUrl: string | undefined, roomId: string): string | null {
+    if (typeof uploadUrl !== 'string') {
+      return null;
+    }
+    const normalized = sanitizeManagedUploadUrl(uploadUrl);
+    if (!normalized) {
+      return null;
+    }
+    const prefix = `${UPLOAD_URL_PREFIX}/${roomId}/`;
+    if (!normalized.startsWith(prefix)) {
+      return null;
+    }
+    return normalized;
+  }
+
+  private async removeManagedUploadByUrl(uploadUrl: string): Promise<void> {
+    const normalized = normalizeManagedUploadPath(uploadUrl);
+    if (!normalized) {
+      return;
+    }
+    const segments = normalized.slice(`${UPLOAD_URL_PREFIX}/`.length).split('/');
+    if (segments.length !== 2) {
+      return;
+    }
+    const [roomId, fileName] = segments;
+    if (!roomId || !fileName) {
+      return;
+    }
+
+    try {
+      await this.assetStorage.deleteObject(roomId, fileName);
+    } catch {
+      // 忽略删除失败，避免影响主流程
+    }
   }
 
   private buildPublicRoomSnapshot(room: Room): {
@@ -842,7 +1021,6 @@ export class RoomManager {
       joinedAt: participant.joinedAt,
       online: participant.online,
       lastSeenAt: participant.lastSeenAt,
-      ticket: participant.ticket,
       works: cloneParticipantWorks(participant.works),
     };
   }
@@ -1039,17 +1217,136 @@ function sanitizeImageWorkUrl(input: string): string {
     return '';
   }
   const trimmed = input.trim();
-  if (!trimmed || trimmed.length > MAX_WORK_URL_LENGTH) {
+  if (!trimmed || trimmed.length > MAX_IMAGE_DATA_URL_LENGTH) {
     return '';
   }
-  if (!isBase64ImageDataUrl(trimmed)) {
-    return '';
+
+  if (isBase64ImageDataUrl(trimmed)) {
+    return trimmed;
   }
-  return trimmed;
+
+  const managedUpload = sanitizeManagedUploadUrl(trimmed);
+  if (managedUpload) {
+    return managedUpload;
+  }
+
+  const normalizedHttpUrl = sanitizeHttpWorkUrl(trimmed);
+  if (normalizedHttpUrl && hasKnownImageExtension(normalizedHttpUrl)) {
+    return normalizedHttpUrl;
+  }
+
+  return '';
 }
 
 function isBase64ImageDataUrl(value: string): boolean {
   return /^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/.test(value);
+}
+
+function sanitizeManagedUploadUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (trimmed.startsWith(`${UPLOAD_URL_PREFIX}/`)) {
+    return normalizeManagedUploadPath(trimmed);
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    return normalizeManagedUploadPath(parsed.pathname);
+  } catch {
+    return '';
+  }
+}
+
+function normalizeManagedUploadPath(pathValue: string): string {
+  const normalized = path.posix.normalize(pathValue);
+  const prefix = `${UPLOAD_URL_PREFIX}/`;
+  if (!normalized.startsWith(prefix)) {
+    return '';
+  }
+
+  const tail = normalized.slice(prefix.length);
+  const segments = tail.split('/');
+  if (segments.length !== 2) {
+    return '';
+  }
+
+  const [roomId, fileName] = segments;
+  if (!isSafePathSegment(roomId) || !isSafePathSegment(fileName) || !hasKnownImageExtension(fileName)) {
+    return '';
+  }
+
+  return `${UPLOAD_URL_PREFIX}/${roomId}/${fileName}`;
+}
+
+function isSafePathSegment(value: string): boolean {
+  return /^[a-zA-Z0-9._-]+$/.test(value);
+}
+
+function hasKnownImageExtension(value: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(value);
+}
+
+function parseBase64ImageDataUrl(input: string): { mimeType: string; buffer: Buffer; byteLength: number } | null {
+  if (typeof input !== 'string') {
+    return null;
+  }
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.length > MAX_IMAGE_DATA_URL_LENGTH) {
+    return null;
+  }
+
+  const matched = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=\s]+)$/.exec(trimmed);
+  if (!matched) {
+    return null;
+  }
+
+  const mimeType = matched[1].toLowerCase();
+  const rawBase64 = matched[2].replace(/\s+/g, '');
+  if (!rawBase64) {
+    return null;
+  }
+
+  try {
+    const buffer = Buffer.from(rawBase64, 'base64');
+    if (buffer.length === 0) {
+      return null;
+    }
+    return {
+      mimeType,
+      buffer,
+      byteLength: buffer.length,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveImageExtensionByMime(mimeType: string): string | null {
+  if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+    return '.jpg';
+  }
+  if (mimeType === 'image/png') {
+    return '.png';
+  }
+  if (mimeType === 'image/webp') {
+    return '.webp';
+  }
+  if (mimeType === 'image/gif') {
+    return '.gif';
+  }
+  if (mimeType === 'image/svg+xml') {
+    return '.svg';
+  }
+  if (mimeType === 'image/avif') {
+    return '.avif';
+  }
+  if (mimeType === 'image/bmp') {
+    return '.bmp';
+  }
+  return null;
 }
 
 function sanitizeWorkDescription(input: string): string {

@@ -5,6 +5,7 @@ const { MemoryStore } = require('../dist/store.js');
 function buildRoom() {
   const now = Date.now();
   return {
+    id: 'room-1',
     title: 'Demo Room',
     participantLimit: 50,
     hostId: 'host-1',

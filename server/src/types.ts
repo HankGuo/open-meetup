@@ -32,7 +32,6 @@ export interface PublicParticipant {
   joinedAt: number;
   online: boolean;
   lastSeenAt: number;
-  ticket?: string;
   works?: ParticipantWorks;
 }
 
@@ -55,6 +54,7 @@ export interface MeetingPageDefinition {
 }
 
 export interface Room {
+  id: string;
   title: string;
   participantLimit: number;
   hostId: string;

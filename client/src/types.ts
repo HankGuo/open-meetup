@@ -34,7 +34,6 @@ export interface User {
   joinedAt: number;
   online: boolean;
   lastSeenAt: number;
-  ticket?: string;
   works?: ParticipantWorks;
 }
 

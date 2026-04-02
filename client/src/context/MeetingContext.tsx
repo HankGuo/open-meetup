@@ -78,6 +78,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   }, []);
 
   const resetRoomState = useCallback(() => {
+    setTitle('');
     setParticipants([]);
     setHostId('');
     setPhase('setup');
@@ -206,7 +207,11 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
       applySyncData(response.data);
       if (response.data.ticket) {
-        localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
+        try {
+          localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
+        } catch {
+          // ignore storage failure
+        }
       }
       return true;
     },
@@ -234,7 +239,11 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
       applySyncData(response.data);
       if (response.data.ticket) {
-        localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
+        try {
+          localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
+        } catch {
+          // ignore storage failure
+        }
       }
       return true;
     },
@@ -414,36 +423,6 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       setIsConnected(false);
     };
 
-    const onUserJoined = (data: { user: User }) => {
-      setParticipants((prev) => {
-        const exists = prev.some((participant) => participant.userId === data.user.userId);
-        if (exists) {
-          return prev.map((participant) => (participant.userId === data.user.userId ? data.user : participant));
-        }
-        return [...prev, data.user];
-      });
-    };
-
-    const onUserLeft = (data: { user: User }) => {
-      setParticipants((prev) => prev.filter((participant) => participant.userId !== data.user.userId));
-    };
-
-    const onUserOnline = (data: { user: User }) => {
-      setParticipants((prev) => {
-        const exists = prev.some((participant) => participant.userId === data.user.userId);
-        if (!exists) {
-          return [...prev, data.user];
-        }
-        return prev.map((participant) => (participant.userId === data.user.userId ? data.user : participant));
-      });
-    };
-
-    const onUserOffline = (data: { user: User }) => {
-      setParticipants((prev) =>
-        prev.map((participant) => (participant.userId === data.user.userId ? data.user : participant)),
-      );
-    };
-
     const onStateSync = (data: StateSyncEvent) => {
       setParticipants(data.participants);
       setHostId(data.hostId);
@@ -451,10 +430,6 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       setCurrentStep(data.currentStep);
       setPages(data.pages);
       setPageContents(new Map(data.pageContents ?? []));
-    };
-
-    const onMeetingNext = (data: { currentStep: number }) => {
-      setCurrentStep(data.currentStep);
     };
 
     const onRoomClosed = (data: { reason: string }) => {
@@ -466,23 +441,13 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
-    socket.on('room:user-joined', onUserJoined);
-    socket.on('room:user-left', onUserLeft);
-    socket.on('room:user-online', onUserOnline);
-    socket.on('room:user-offline', onUserOffline);
     socket.on('state:sync', onStateSync);
-    socket.on('control:next', onMeetingNext);
     socket.on('room:closed', onRoomClosed);
 
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
-      socket.off('room:user-joined', onUserJoined);
-      socket.off('room:user-left', onUserLeft);
-      socket.off('room:user-online', onUserOnline);
-      socket.off('room:user-offline', onUserOffline);
       socket.off('state:sync', onStateSync);
-      socket.off('control:next', onMeetingNext);
       socket.off('room:closed', onRoomClosed);
     };
   }, [clearSession, reconnectWithSession, resetRoomState, socket]);

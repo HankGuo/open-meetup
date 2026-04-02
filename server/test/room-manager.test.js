@@ -1,7 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { RoomManager } = require('../dist/roomManager.js');
 const { MemoryStore } = require('../dist/store.js');
+
+const UPLOAD_ROOT = path.resolve(__dirname, '..', 'uploads');
 
 function createManager() {
   return new RoomManager(new MemoryStore());
@@ -28,20 +32,20 @@ function createPagesForSetup() {
   ];
 }
 
-function seedPages(manager, hostIdentity, pages = createPagesForSetup()) {
-  const result = manager.updatePages(hostIdentity, pages);
+async function seedPages(manager, hostIdentity, pages = createPagesForSetup()) {
+  const result = await manager.updatePages(hostIdentity, pages);
   assert.equal(result.success, true);
   return pages;
 }
 
-test('new room should start with no preconfigured pages', () => {
+test('new room should start with no preconfigured pages', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   assert.equal(created.data.pages.length, 0);
 });
 
-test('host can configure participant limit when creating room', () => {
+test('host can configure participant limit when creating room', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host', 1);
   assert.equal(created.success, true);
@@ -54,11 +58,11 @@ test('host can configure participant limit when creating room', () => {
   assert.equal(secondJoin.error.code, 'ROOM_FULL');
 });
 
-test('nextStep should be capped at max page index', () => {
+test('nextStep should be capped at max page index', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   const hostIdentity = getHostIdentity(created);
-  seedPages(manager, hostIdentity);
+  await seedPages(manager, hostIdentity);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
 
@@ -72,12 +76,12 @@ test('nextStep should be capped at max page index', () => {
   assert.equal(state.data.currentStep, 5);
 });
 
-test('setup phase allows editing pages but live phase blocks editing', () => {
+test('setup phase allows editing pages but live phase blocks editing', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const pages = seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
+  const pages = await seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
   const pageId = pages[0].id;
 
   const setupEdit = manager.updatePageContent(hostIdentity, pageId, {
@@ -97,12 +101,12 @@ test('setup phase allows editing pages but live phase blocks editing', () => {
   assert.equal(liveEdit.error.code, 'BAD_REQUEST');
 });
 
-test('host can reorder pages during setup and content follows page id', () => {
+test('host can reorder pages during setup and content follows page id', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const pages = seedPages(manager, hostIdentity, createPagesForSetup().slice(0, 3));
+  const pages = await seedPages(manager, hostIdentity, createPagesForSetup().slice(0, 3));
   const [firstPage, secondPage] = pages;
   assert.ok(firstPage && secondPage);
 
@@ -113,19 +117,19 @@ test('host can reorder pages during setup and content follows page id', () => {
   assert.equal(contentWrite.success, true);
 
   const reordered = [secondPage, firstPage, ...pages.slice(2)];
-  const updatePages = manager.updatePages(hostIdentity, reordered);
+  const updatePages = await manager.updatePages(hostIdentity, reordered);
   assert.equal(updatePages.success, true);
 
   const pageContents = new Map(updatePages.data.pageContents || []);
   assert.equal(pageContents.get(firstPage.id)?.content, 'content-1');
 });
 
-test('host can return from live to setup and keep current page index', () => {
+test('host can return from live to setup and keep current page index', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  seedPages(manager, hostIdentity);
+  await seedPages(manager, hostIdentity);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
 
@@ -138,7 +142,7 @@ test('host can return from live to setup and keep current page index', () => {
   assert.equal(returned.data.currentStep, 2);
 });
 
-test('forceEndRoom should close room immediately and prevent host handover', () => {
+test('forceEndRoom should close room immediately and prevent host handover', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
@@ -151,7 +155,7 @@ test('forceEndRoom should close room immediately and prevent host handover', () 
     sessionId: join.data.sessionId,
   };
 
-  const ended = manager.forceEndRoom(hostIdentity);
+  const ended = await manager.forceEndRoom(hostIdentity);
   assert.equal(ended.success, true);
   assert.equal(ended.data.closed, true);
   assert.equal(manager.getActiveRoom(), null);
@@ -165,19 +169,19 @@ test('forceEndRoom should close room immediately and prevent host handover', () 
   assert.equal(joinAfterEnd.error.code, 'ROOM_NOT_FOUND');
 });
 
-test('setup phase should allow removing all pages', () => {
+test('setup phase should allow removing all pages', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
+  await seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
 
-  const removed = manager.updatePages(hostIdentity, []);
+  const removed = await manager.updatePages(hostIdentity, []);
   assert.equal(removed.success, true);
   assert.equal(removed.data.pages.length, 0);
 });
 
-test('ticket join should restore existing participant instead of creating duplicate', () => {
+test('ticket join should restore existing participant instead of creating duplicate', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
@@ -198,9 +202,14 @@ test('ticket join should restore existing participant instead of creating duplic
   const room = manager.getActiveRoom();
   assert.ok(room);
   assert.equal(room.participants.size, 2);
+
+  const snapshot = manager.getPublicRoomSnapshot();
+  assert.equal(snapshot.success, true);
+  const allParticipantsWithoutTicket = snapshot.data.participants.every((participant) => !('ticket' in participant));
+  assert.equal(allParticipantsWithoutTicket, true);
 });
 
-test('host ticket should restore host identity', () => {
+test('host ticket should restore host identity', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
@@ -219,7 +228,7 @@ test('host ticket should restore host identity', () => {
   assert.equal(rejoined.data.userRole, 'host');
 });
 
-test('invalid ticket should be rejected', () => {
+test('invalid ticket should be rejected', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
@@ -229,7 +238,49 @@ test('invalid ticket should be rejected', () => {
   assert.equal(result.error.code, 'INVALID_TICKET');
 });
 
-test('cleanupExpired should report removed offline participants', () => {
+test('checkTicket should only return valid flag for host and participant tickets', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostTicket = created.data.ticket;
+  assert.ok(hostTicket);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantTicket = join.data.ticket;
+  assert.ok(participantTicket);
+
+  const hostCheck = manager.checkTicket(hostTicket);
+  assert.deepEqual(hostCheck, { valid: true });
+
+  const participantCheck = manager.checkTicket(participantTicket);
+  assert.deepEqual(participantCheck, { valid: true });
+
+  const invalidCheck = manager.checkTicket('TKT-NOT-EXISTS');
+  assert.deepEqual(invalidCheck, { valid: false });
+});
+
+test('isIdentityAuthorized should respect session match and room lifecycle', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+
+  assert.equal(manager.isIdentityAuthorized(hostIdentity), true);
+  assert.equal(
+    manager.isIdentityAuthorized({
+      userId: hostIdentity.userId,
+      sessionId: 'wrong-session',
+    }),
+    false,
+  );
+
+  const ended = await manager.forceEndRoom(hostIdentity);
+  assert.equal(ended.success, true);
+  assert.equal(manager.isIdentityAuthorized(hostIdentity), false);
+});
+
+test('cleanupExpired should report removed offline participants', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
@@ -239,21 +290,23 @@ test('cleanupExpired should report removed offline participants', () => {
   manager.onSocketDisconnected('socket-a');
 
   const now = Date.now() + manager.getDisconnectGraceMs() + 1;
-  const cleanup = manager.cleanupExpired(now);
+  const cleanup = await manager.cleanupExpired(now);
 
   assert.equal(cleanup.closedRooms.length, 0);
   assert.equal(cleanup.removedParticipants.length, 1);
   assert.equal(cleanup.removedParticipants[0].userName, 'Alice');
 });
 
-test('participant can submit work and persist url/description fields', () => {
+test('participant can submit work and persist url/description fields', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const pages = seedPages(manager, hostIdentity);
+  const pages = await seedPages(manager, hostIdentity);
   const urlShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'url');
   assert.ok(urlShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -263,7 +316,7 @@ test('participant can submit work and persist url/description fields', () => {
     sessionId: join.data.sessionId,
   };
 
-  const submit = manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work', '我的 demo 作品');
+  const submit = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work', '我的 demo 作品');
   assert.equal(submit.success, true);
 
   const snapshot = manager.getPublicRoomSnapshot();
@@ -276,46 +329,47 @@ test('participant can submit work and persist url/description fields', () => {
   assert.ok(typeof alice.works[urlShowcasePage.id].updatedAt === 'number');
 });
 
-test('host cannot submit work as participant', () => {
+test('host cannot submit work as participant', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   const hostIdentity = getHostIdentity(created);
 
-  const submit = manager.submitWork(hostIdentity, 'page-showcase-url-a', 'https://example.com/work', 'host try');
+  const submit = await manager.submitWork(hostIdentity, 'page-showcase-url-a', 'https://example.com/work', 'host try');
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'NOT_AUTHORIZED');
 });
 
-test('submit work should reject non-http urls on url-mode page', () => {
+test('submit work should be blocked during setup phase', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const pages = seedPages(manager, hostIdentity);
+  const pages = await seedPages(manager, hostIdentity);
   const urlShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'url');
   assert.ok(urlShowcasePage);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
-
   const participantIdentity = {
     userId: join.data.userId,
     sessionId: join.data.sessionId,
   };
 
-  const submit = manager.submitWork(participantIdentity, urlShowcasePage.id, 'javascript:alert(1)', 'bad');
+  const submit = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work', 'setup 提交');
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'BAD_REQUEST');
 });
 
-test('submit work should reject non-image payload on image-mode page', () => {
+test('submit work should reject non-http urls on url-mode page', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const pages = seedPages(manager, hostIdentity);
-  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
-  assert.ok(imageShowcasePage);
+  const pages = await seedPages(manager, hostIdentity);
+  const urlShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'url');
+  assert.ok(urlShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -325,21 +379,47 @@ test('submit work should reject non-image payload on image-mode page', () => {
     sessionId: join.data.sessionId,
   };
 
-  const submit = manager.submitWork(participantIdentity, imageShowcasePage.id, 'https://example.com/not-image', 'bad');
+  const submit = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'javascript:alert(1)', 'bad');
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'BAD_REQUEST');
 });
 
-test('submissions should be isolated by showcase page id', () => {
+test('submit work should reject non-image payload on image-mode page', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  const pages = seedPages(manager, hostIdentity);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submit = await manager.submitWork(participantIdentity, imageShowcasePage.id, 'https://example.com/not-image', 'bad');
+  assert.equal(submit.success, false);
+  assert.equal(submit.error.code, 'BAD_REQUEST');
+});
+
+test('submissions should be isolated by showcase page id', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
   const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
   const urlShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'url');
   assert.ok(imageShowcasePage);
   assert.ok(urlShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -349,9 +429,9 @@ test('submissions should be isolated by showcase page id', () => {
     sessionId: join.data.sessionId,
   };
 
-  const submitUrl = manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work-a', 'URL 作品');
+  const submitUrl = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work-a', 'URL 作品');
   assert.equal(submitUrl.success, true);
-  const submitImage = manager.submitWork(
+  const submitImage = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
@@ -367,3 +447,277 @@ test('submissions should be isolated by showcase page id', () => {
   assert.equal(alice.works[urlShowcasePage.id].description, 'URL 作品');
   assert.equal(alice.works[imageShowcasePage.id].description, '图片作品');
 });
+
+test('image submission should be persisted as upload url and cleaned after room close', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    '图片作品',
+  );
+  assert.equal(submit.success, true);
+
+  const storedUrl = submit.data.participants
+    .find((participant) => participant.userId === join.data.userId)
+    .works[imageShowcasePage.id].url;
+  assert.equal(storedUrl.startsWith('/uploads/'), true);
+  assert.equal(storedUrl.startsWith('data:image/'), false);
+
+  const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
+  assert.equal(fs.existsSync(storedPath), true);
+
+  const ended = await manager.forceEndRoom(hostIdentity);
+  assert.equal(ended.success, true);
+  assert.equal(fs.existsSync(storedPath), false);
+
+  safeCleanupUploadRoot();
+});
+
+test('replacing image submission should cleanup previous upload asset', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const firstSubmit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    '第一版',
+  );
+  assert.equal(firstSubmit.success, true);
+  const firstStoredUrl = firstSubmit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const firstStoredPath = path.resolve(__dirname, '..', firstStoredUrl.slice(1));
+  assert.equal(fs.existsSync(firstStoredPath), true);
+
+  const secondSubmit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAQAAADZc7J/AAAADElEQVR42mP8z8BQDwAFgwJ/lHpmsQAAAABJRU5ErkJggg==',
+    '第二版',
+  );
+  assert.equal(secondSubmit.success, true);
+  const secondStoredUrl = secondSubmit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const secondStoredPath = path.resolve(__dirname, '..', secondStoredUrl.slice(1));
+  assert.equal(fs.existsSync(secondStoredPath), true);
+  assert.equal(firstStoredPath === secondStoredPath, false);
+  assert.equal(fs.existsSync(firstStoredPath), false);
+
+  const ended = await manager.forceEndRoom(hostIdentity);
+  assert.equal(ended.success, true);
+  assert.equal(fs.existsSync(secondStoredPath), false);
+
+  safeCleanupUploadRoot();
+});
+
+test('removing showcase page should cleanup removed image submissions', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    '图片作品',
+  );
+  assert.equal(submit.success, true);
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
+  assert.equal(fs.existsSync(storedPath), true);
+
+  const returned = manager.returnToSetup(hostIdentity);
+  assert.equal(returned.success, true);
+  const updatedPages = pages.filter((page) => page.id !== imageShowcasePage.id);
+  const updated = await manager.updatePages(hostIdentity, updatedPages);
+  assert.equal(updated.success, true);
+  assert.equal(fs.existsSync(storedPath), false);
+
+  safeCleanupUploadRoot();
+});
+
+test('participant leave should cleanup uploaded image assets', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    '图片作品',
+  );
+  assert.equal(submit.success, true);
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
+  assert.equal(fs.existsSync(storedPath), true);
+
+  const leave = await manager.leaveRoom(participantIdentity);
+  assert.equal(leave.ok, true);
+  assert.equal(fs.existsSync(storedPath), false);
+
+  safeCleanupUploadRoot();
+});
+
+test('cleanupExpired should cleanup uploaded image assets for removed offline participants', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    '图片作品',
+  );
+  assert.equal(submit.success, true);
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
+  assert.equal(fs.existsSync(storedPath), true);
+
+  const disconnected = manager.onSocketDisconnected('socket-a');
+  assert.equal(disconnected, true);
+
+  const cleanup = await manager.cleanupExpired(Date.now() + manager.getDisconnectGraceMs() + 1);
+  assert.equal(cleanup.removedParticipants.length, 1);
+  assert.equal(fs.existsSync(storedPath), false);
+
+  safeCleanupUploadRoot();
+});
+
+test('switching showcase mode from image to url should cleanup incompatible uploaded assets', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const submit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    '图片作品',
+  );
+  assert.equal(submit.success, true);
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
+  assert.equal(fs.existsSync(storedPath), true);
+
+  const returned = manager.returnToSetup(hostIdentity);
+  assert.equal(returned.success, true);
+
+  const switchedPages = pages.map((page) => {
+    if (page.id !== imageShowcasePage.id) {
+      return page;
+    }
+    return {
+      ...page,
+      submissionMode: 'url',
+    };
+  });
+  const updated = await manager.updatePages(hostIdentity, switchedPages);
+  assert.equal(updated.success, true);
+  assert.equal(fs.existsSync(storedPath), false);
+
+  safeCleanupUploadRoot();
+});
+
+function safeCleanupUploadRoot() {
+  try {
+    fs.rmSync(UPLOAD_ROOT, { recursive: true, force: true });
+  } catch {
+    // ignore cleanup failure
+  }
+}

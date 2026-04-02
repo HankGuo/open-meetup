@@ -9,9 +9,12 @@ export function getServerBaseUrl(): string {
   }
 
   if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const host = window.location.hostname || 'localhost';
-    return `${protocol}//${host}:3001`;
+    if (import.meta.env.DEV) {
+      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const host = window.location.hostname || 'localhost';
+      return `${protocol}//${host}:3001`;
+    }
+    return trimTrailingSlash(window.location.origin);
   }
 
   return 'http://localhost:3001';

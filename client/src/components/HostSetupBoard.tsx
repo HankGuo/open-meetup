@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Copy,
@@ -11,6 +11,7 @@ import {
   Plus,
   Power,
   RadioTower,
+  Share2,
   Sparkles,
   Ticket,
   Trash2,
@@ -24,6 +25,9 @@ import { PageEditor } from './PageEditor';
 interface HostSetupBoardProps {
   defaultSelectedPageId?: string | null;
   roomTitle?: string;
+  shareAddress?: string;
+  copiedShareAddress?: boolean;
+  onCopyShareAddress?: () => void;
   ticketCode?: string;
   copiedTicket?: boolean;
   onCopyTicket?: () => void;
@@ -34,6 +38,9 @@ interface HostSetupBoardProps {
 export function HostSetupBoard({
   defaultSelectedPageId,
   roomTitle,
+  shareAddress,
+  copiedShareAddress = false,
+  onCopyShareAddress,
   ticketCode,
   copiedTicket = false,
   onCopyTicket,
@@ -47,6 +54,7 @@ export function HostSetupBoard({
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const appliedDefaultSelectionRef = useRef<string | null>(null);
 
   const [showCreateShowcaseDialog, setShowCreateShowcaseDialog] = useState(false);
   const [newShowcaseMode, setNewShowcaseMode] = useState<PageSubmissionMode>('url');
@@ -58,8 +66,13 @@ export function HostSetupBoard({
   }, [pages]);
 
   useEffect(() => {
-    if (defaultSelectedPageId && pages.some((page) => page.id === defaultSelectedPageId)) {
+    if (
+      defaultSelectedPageId &&
+      defaultSelectedPageId !== appliedDefaultSelectionRef.current &&
+      pages.some((page) => page.id === defaultSelectedPageId)
+    ) {
       setSelectedPageId(defaultSelectedPageId);
+      appliedDefaultSelectionRef.current = defaultSelectedPageId;
       return;
     }
     if (!selectedPageId || !pages.some((page) => page.id === selectedPageId)) {
@@ -364,6 +377,26 @@ export function HostSetupBoard({
           </section>
 
           <aside className="flex min-h-0 flex-col gap-3">
+            {shareAddress ? (
+              <div className="app-card p-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="section-title">参与者访问地址</p>
+                  <Share2 className="h-4 w-4 text-[var(--accent)]" />
+                </div>
+                <p className="mono mt-1 break-all text-sm font-semibold text-[var(--text)]">{shareAddress}</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--text-soft)]">将这个地址发给同一局域网内的参与者即可进入房间。</p>
+                <button
+                  type="button"
+                  onClick={() => onCopyShareAddress?.()}
+                  disabled={!onCopyShareAddress}
+                  className="btn-base btn-secondary mt-2.5 h-9 w-full rounded-lg px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {copiedShareAddress ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                  {copiedShareAddress ? '已复制地址' : '复制访问地址'}
+                </button>
+              </div>
+            ) : null}
+
             {ticketCode ? (
               <div className="app-card p-3.5">
                 <div className="flex items-center justify-between gap-2">

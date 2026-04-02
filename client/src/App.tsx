@@ -11,18 +11,19 @@ import { buildServerApiUrl } from './serverUrl';
 type AppView = 'checking' | 'lobby' | 'join' | 'room';
 
 function AppContent() {
-  const { myRole, myUserId, clearError } = useMeeting();
+  const { myRole, myUserId } = useMeeting();
   const [view, setView] = useState<AppView>('checking');
 
   useEffect(() => {
     void checkServerState();
   }, []);
 
-  // 当已经成功创建/加入房间后，自动进入房间视图
   useEffect(() => {
     if (myUserId && (myRole === 'host' || myRole === 'participant')) {
       setView('room');
+      return;
     }
+    void checkServerState();
   }, [myUserId, myRole]);
 
   async function checkServerState() {
@@ -32,14 +33,12 @@ function AppContent() {
 
       if (!data.exists) {
         clearRoomEntryStorage();
-        clearError();
         setView('lobby');
       } else {
         setView('join');
       }
     } catch {
       clearRoomEntryStorage();
-      clearError();
       setView('lobby');
     }
   }

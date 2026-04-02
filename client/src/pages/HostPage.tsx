@@ -11,6 +11,8 @@ export function HostPage() {
   const [setupFocusPageId, setSetupFocusPageId] = useState<string | null>(null);
   const [ticketConfirmed, setTicketConfirmed] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [copiedShareAddress, setCopiedShareAddress] = useState(false);
+  const shareAddress = typeof window !== 'undefined' ? window.location.origin : '';
 
   useEffect(() => {
     setCopied(false);
@@ -54,6 +56,21 @@ export function HostPage() {
       }, 1800);
     } catch {
       setCopied(false);
+    }
+  }
+
+  async function handleCopyShareAddress() {
+    if (!shareAddress) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareAddress);
+      setCopiedShareAddress(true);
+      window.setTimeout(() => {
+        setCopiedShareAddress(false);
+      }, 1800);
+    } catch {
+      setCopiedShareAddress(false);
     }
   }
 
@@ -121,6 +138,9 @@ export function HostPage() {
         <HostSetupBoard
           defaultSelectedPageId={setupFocusPageId}
           roomTitle={title}
+          shareAddress={shareAddress}
+          copiedShareAddress={copiedShareAddress}
+          onCopyShareAddress={() => void handleCopyShareAddress()}
           ticketCode={myTicket}
           copiedTicket={copied}
           onCopyTicket={() => void handleCopyTicket()}

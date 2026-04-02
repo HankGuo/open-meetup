@@ -2,7 +2,7 @@
 
 一个单房间实时互动系统，基于 **React + Socket.IO + TypeScript**。
 
-如需快速启动，可直接阅读「2. 快速启动（30 秒）」。
+如需快速启动，可直接阅读「2. 快速启动（局域网 Docker，一条命令）」。
 
 ## 1. 项目作用（按当前代码实现）
 
@@ -17,164 +17,85 @@
 - 页面类型可编排：支持 `canvas` 与 `showcase` 两类页面，`showcase` 支持 `url/image` 提交模式与可选排名
 - 同步与清理闭环：主持人结束或离线超时时，服务端统一广播关闭事件，客户端统一清理本地状态
 
-## 2. 快速启动（30 秒）
+## 2. 快速启动（局域网 Docker，一条命令）
 
-### macOS / Linux（推荐）
+### 第 0 步：准备环境
+
+- 安装 Docker（Docker Desktop 或 Docker Engine）
+- 确保主持人电脑和参与者设备在同一局域网
+
+### 第 1 步：启动
 
 ```bash
 cd open-meetup
-npm run install:all
+npm run lan:up -- --host-password 12345678
+```
+
+脚本会自动输出并高亮“主持人访问地址 / 参与者访问地址”，格式如下：
+
+- `http://<你的局域网IP>:8080`
+
+在 macOS 上，脚本会自动把这个地址复制到剪贴板，可直接粘贴到群里。
+
+### 第 2 步：停止 / 看日志
+
+```bash
+# 停止
+npm run lan:down
+
+# 跟踪日志
+npm run lan:logs
+```
+
+## 3. 主持人如何快速告诉大家访问地址
+
+局域网模式下不需要主持人自己查端口和拼地址：
+
+1. 运行 `npm run lan:up -- --host-password ...`
+2. 终端会直接打印可分享地址（`http://<LAN-IP>:8080`）
+3. macOS 自动复制到剪贴板，直接发给参与者
+4. 主持人进入「页面编排控制台」后，右侧会显示“参与者访问地址”，可一键复制
+
+也就是说，主持人只要记住一句话：**启动后复制终端里那条地址发出去**。
+
+## 4. 开发模式（仅你迭代代码时）
+
+如果你在开发新功能，建议继续用本地热更新模式：
+
+```bash
+# 启动前后端热更新
 npm run dev:restart -- --host-password 12345678
+
+# 停止
+npm run dev:stop
 ```
 
-看到以下信息就算成功：
-
-- `Server (local): http://localhost:3001`
-- `Client (local): http://localhost:5173`
-
-然后打开浏览器访问：
-
-- 前端：`http://localhost:5173`
-
-### Windows（PowerShell）
-
-如果你没有 `bash`（即不能用 `dev:restart`），用下面这套：
-
-```powershell
-cd open-meetup
-npm run install:all
-$env:HOST_PASSWORD="12345678"
-npm run dev
-```
-
-打开：`http://localhost:5173`
-
-## 3. 完整新手流程（一步一步）
-
-### 第 0 步：检查环境
-
-```bash
-node -v
-npm -v
-```
-
-要求：
-
-- Node.js >= 18
-- npm >= 9
-
-### 第 1 步：安装依赖
-
-```bash
-npm run install:all
-```
-
-### 第 2 步：启动项目
-
-推荐（带日志、支持参数）：
-
-```bash
-npm run dev:restart -- --host-password 12345678
-```
-
-常规（不带脚本增强能力）：
-
-```bash
-npm run dev
-```
-
-### 第 3 步：验证服务是否正常
-
-打开：
-
-- `http://localhost:5173`（前端）
-- `http://localhost:3001/health`（后端健康检查）
-
-`/health` 返回 `{"status":"ok", ...}` 即正常。
-
-### 第 4 步：创建房间
-
-1. 打开前端页面
-2. 填写：你的姓名、房间标题、授权口令、参与者人数上限
-3. 授权口令默认是：`12345678`
-4. 创建成功后进入主持人编排台
-
-### 第 5 步：参与者加入
-
-- 首次加入：填昵称后加入，系统发 Ticket
-- 后续加入：直接输入 Ticket
-- 自动读取本地 Ticket 时，也会先到后端校验
-
-## 4. 默认配置
+## 5. 默认配置
 
 - 主持人授权口令默认值：`12345678`
-- 服务端默认监听：`0.0.0.0:3001`
-- 前端默认端口：`5173`
+- LAN 对外端口默认：`8080`
+- 服务端容器监听：`3001`（仅容器内部）
 - 创建房间时默认人数上限：`50`（不含主持人）
 
-## 5. 如何改授权口令
+## 6. 前后端地址规则（避免踩坑）
 
-### 方法 A：启动脚本参数（最简单）
+- 局域网 Docker 模式：前后端同域访问（`http://<LAN-IP>:8080`），无需设置 `VITE_SERVER_URL`
+- 开发模式（Vite）：前端自动连接到同主机的 `:3001`
+- 如果你显式设置了 `VITE_SERVER_URL`，则以该值为准
 
-```bash
-npm run dev:restart -- --host-password my-secret-password
-```
-
-### 方法 B：环境变量
+## 7. 常用命令速查
 
 ```bash
-HOST_PASSWORD=my-secret-password npm run dev:server
-```
+# 局域网模式：启动（推荐给线下活动）
+npm run lan:up -- --host-password 12345678
 
-## 6. 支持任意 IP 访问（手机/局域网）
+# 局域网模式：停止
+npm run lan:down
 
-本项目已默认支持局域网访问：
+# 局域网模式：日志
+npm run lan:logs
 
-- 服务端绑定 `0.0.0.0`
-- 前端 Vite 绑定 `0.0.0.0`
-- 前端未配置 `VITE_SERVER_URL` 时，会自动按当前页面主机名连接后端
-
-### 操作步骤
-
-1. 保证手机和电脑在同一局域网
-2. 启动时看 `dev:restart` 输出中的 `Client (LAN)` 地址
-3. 手机上直接访问该地址，例如：`http://192.168.1.23:5173`
-
-如果 `dev:restart` 没打印出 LAN 地址，可手动查本机 IP：
-
-macOS:
-
-```bash
-ipconfig getifaddr en0
-```
-
-Windows:
-
-```powershell
-ipconfig
-```
-
-然后访问：`http://<你的IP>:5173`
-
-## 7. 前后端地址规则（避免踩坑）
-
-客户端连接后端顺序如下：
-
-1. 如果设置了 `VITE_SERVER_URL`，优先使用它
-2. 如果没设置，自动用“当前页面主机名 + :3001”
-
-所以在局域网访问场景，通常不需要再改前端配置。
-
-## 8. 常用命令速查
-
-```bash
-# 安装所有依赖
-npm run install:all
-
-# 同时启动前后端
-npm run dev
-
-# 推荐启动（支持 host-password、端口参数、日志）
+# 本地开发热更新
 npm run dev:restart -- --host-password 12345678
 
 # 停止开发进程
@@ -190,7 +111,22 @@ npm test
 npm run sim:bulk-join
 ```
 
-## 9. 环境变量清单
+## 8. 环境变量清单
+
+### Docker Compose（局域网模式）
+
+- `HOST_PASSWORD`：主持人授权口令，默认 `12345678`
+- `LAN_PORT`：对外访问端口，默认 `8080`
+- `MINIO_ROOT_USER`：MinIO 管理账号，默认 `minioadmin`
+- `MINIO_ROOT_PASSWORD`：MinIO 管理口令，默认 `minioadmin`
+- `MINIO_BUCKET`：对象存储桶名，默认 `open-meetup-assets`
+- `MINIO_REGION`：桶区域，默认 `us-east-1`
+
+建议先执行：
+
+```bash
+cp .env.example .env
+```
 
 ### 服务端
 
@@ -199,15 +135,50 @@ npm run sim:bulk-join
 - `PORT`：服务端端口，默认 `3001`
 - `MAX_PARTICIPANTS_PER_ROOM`：创建房间默认人数上限，默认 `50`，范围 `1-500`
 - `ROOM_CLEANUP_INTERVAL_MS`：清理间隔，默认 `30000`
+- `CORS_ALLOW_ORIGIN`：允许跨域来源，支持逗号分隔（示例：`http://localhost:5173,http://192.168.1.12:5173`）
+- `TRUST_PROXY`：可选，`false`（默认）/`true`/正整数（代理跳数）
+- `TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS`：Ticket 校验接口单窗口最大请求数，默认 `60`
+- `ASSET_STORAGE_PROVIDER`：上传资源存储提供者，默认 `local`，可选 `local|minio`
+- `MINIO_ENDPOINT`：当 `ASSET_STORAGE_PROVIDER=minio` 时必填
+- `MINIO_PORT`：MinIO 端口，默认 `9000`
+- `MINIO_USE_SSL`：是否启用 HTTPS，默认 `false`
+- `MINIO_ACCESS_KEY`：当 `ASSET_STORAGE_PROVIDER=minio` 时必填
+- `MINIO_SECRET_KEY`：当 `ASSET_STORAGE_PROVIDER=minio` 时必填
+- `MINIO_BUCKET`：对象存储桶名，默认 `open-meetup-assets`
+- `MINIO_REGION`：桶区域，默认 `us-east-1`
+
+生产环境额外约束：
+
+- 必须显式设置 `HOST_PASSWORD`
+- 必须显式设置 `CORS_ALLOW_ORIGIN`，且不能为 `*`
+
+启用 MinIO 示例：
+
+```bash
+ASSET_STORAGE_PROVIDER=minio \
+MINIO_ENDPOINT=127.0.0.1 \
+MINIO_PORT=9000 \
+MINIO_USE_SSL=false \
+MINIO_ACCESS_KEY=minioadmin \
+MINIO_SECRET_KEY=minioadmin \
+MINIO_BUCKET=open-meetup-assets \
+npm run dev:server
+```
 
 ### 前端
 
 - `VITE_SERVER_URL`：可选，显式指定后端地址
 - `VITE_SOCKET_ACK_TIMEOUT_MS`：Socket ACK 超时，默认 `6000`
 
-## 10. 常见问题
+## 9. 常见问题
 
-### Q1: 页面打不开 / 白屏
+### Q1: 主持人不知道该把哪个地址发给参与者
+
+- 直接使用 `npm run lan:up -- --host-password ...`
+- 启动完成后终端会输出“主持人访问地址 / 参与者访问地址”
+- macOS 会自动复制该地址到剪贴板
+
+### Q2: 页面打不开 / 白屏（开发模式）
 
 ```bash
 npm run dev:stop
@@ -216,7 +187,7 @@ npm run install:all
 npm run dev:restart -- --host-password 12345678
 ```
 
-### Q2: 3001 或 5173 端口被占用
+### Q3: 3001 或 5173 端口被占用（开发模式）
 
 先停：
 
@@ -230,27 +201,33 @@ npm run dev:stop
 npm run dev:restart -- --host-password 12345678 --server-port 3101 --client-port 5174
 ```
 
-### Q3: 提示授权口令错误
+### Q4: 提示授权口令错误
 
 - 确认你创建房间时输入的口令，和服务端实际 `HOST_PASSWORD` 一致
-- 如果你用的是 `dev:restart -- --host-password ...`，以该参数为准
+- 如果你用的是 `lan:up` 或 `dev:restart -- --host-password ...`，以脚本参数为准
 
-### Q4: Ticket 无效
+### Q5: Ticket 无效
 
 - 确认 Ticket 没输错
 - 房间已经结束时，所有旧 Ticket 会失效
 - 手动输入和本地读取都会走服务端校验，这是正常行为
 
-### Q5: 手机访问不到
+### Q6: 手机访问不到（局域网）
 
 - 必须同一局域网
-- 用 `http://<电脑IP>:5173`
-- 关闭系统防火墙或放行 3001/5173（仅内网测试环境）
+- 用 `http://<电脑IP>:8080`（Docker LAN 模式默认）
+- 如果你使用的是开发模式，再用 `http://<电脑IP>:5173`
+- 关闭系统防火墙或放行对应端口（`8080` 或 `5173`）
 
-## 11. 项目结构（关键文件）
+## 10. 项目结构（关键文件）
 
 ```text
 open-meetup/
+├── docker/
+│   ├── Dockerfile.server
+│   ├── Dockerfile.web
+│   └── nginx.lan.conf
+├── docker-compose.lan.yml
 ├── client/
 │   └── src/
 │       ├── components/
@@ -266,12 +243,15 @@ open-meetup/
 │       ├── roomManager.ts
 │       └── config.ts
 └── scripts/
+    ├── lan-up.sh
+    ├── lan-down.sh
+    ├── lan-logs.sh
     ├── dev-restart.sh
     ├── dev-stop.sh
     └── bulk-join-simulator/
 ```
 
-## 12. 发布前检查
+## 11. 发布前检查
 
 ```bash
 npm run build
@@ -280,7 +260,7 @@ npm test
 
 都通过再发布。
 
-## 13. 当前交互规则（产品侧简述）
+## 12. 当前交互规则（产品侧简述）
 
 以下规则严格对应当前代码实现（`server/src/roomManager.ts`、`server/src/handlers.ts`、`server/src/index.ts`、`client/src/context/MeetingContext.tsx`、`client/src/components/JoinPage.tsx`）：
 
@@ -353,12 +333,17 @@ npm test
 ### 13.7 互动提交规则（`showcase` 页面）
 
 - 仅参与者可提交，主持人提交会返回 `NOT_AUTHORIZED`
+- 仅 `live` 阶段允许提交，`setup` 阶段提交会返回 `BAD_REQUEST`
 - 仅 `showcase` 页面允许提交，其他页面返回 `BAD_REQUEST`
 - 提交校验：
   - `submissionMode=url`：必须为有效 `http/https` URL
   - `submissionMode=image`：必须为有效 base64 image data URL
   - `description` 必填，且不超过 120 字
 - 同一参与者在同一页面可重复提交，后一次会覆盖前一次（以最后一次提交为准）
+- 图片提交会写入统一资源存储，并返回 `/uploads/<roomId>/<fileName>` 访问路径：
+  - `ASSET_STORAGE_PROVIDER=local`：写入本地 `server/uploads`
+  - `ASSET_STORAGE_PROVIDER=minio`：写入 MinIO Bucket（对象键为 `<roomId>/<fileName>`）
+- 覆盖提交、删除互动页、参与者离开/超时、房间关闭时都会触发对应资源清理
 
 ### 13.8 房间关闭与本地清理规则
 
@@ -371,7 +356,7 @@ npm test
   - 主动 `leaveRoom`
   - 主动 `endRoom`
   - 收到 `room:closed`
-- 当前实现中的本地清理使用 `localStorage.clear()`，会清空当前站点下全部 localStorage 项
+- 当前实现中的本地清理仅删除 `open-meetup:` 前缀键，不影响同站点其他业务 localStorage 项
 
 ### 13.9 Ticket 提醒与表单行为
 
@@ -380,7 +365,7 @@ npm test
 - 在房间内顶部区域会显示当前 Ticket 的紧凑信息条
 - 表单默认不读取历史自动填充：文本输入项设置 `autoComplete="off"`，口令项使用 `autoComplete="new-password"`
 
-## 14. 许可证（MIT）
+## 13. 许可证（MIT）
 
 本项目采用 **MIT License**（见仓库根目录 `LICENSE` 文件）。
 

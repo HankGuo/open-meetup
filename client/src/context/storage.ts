@@ -5,13 +5,27 @@ export const STORAGE_KEYS = {
 
 export function clearAllLocalStorage() {
   try {
-    localStorage.clear();
+    const prefix = 'open-meetup:';
+    const keysToDelete: string[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key && key.startsWith(prefix)) {
+        keysToDelete.push(key);
+      }
+    }
+    for (const key of keysToDelete) {
+      localStorage.removeItem(key);
+    }
   } catch {
     // ignore storage failure
   }
 }
 
 export function clearRoomEntryStorage() {
-  localStorage.removeItem(STORAGE_KEYS.ticket);
-  localStorage.removeItem(STORAGE_KEYS.ticketAcknowledged);
+  try {
+    localStorage.removeItem(STORAGE_KEYS.ticket);
+    localStorage.removeItem(STORAGE_KEYS.ticketAcknowledged);
+  } catch {
+    // ignore storage failure
+  }
 }

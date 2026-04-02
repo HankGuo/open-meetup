@@ -7,7 +7,6 @@ import { buildServerApiUrl } from '../serverUrl';
 interface TicketCheckResult {
   valid: boolean;
   error?: string;
-  identity?: { role: 'host' | 'participant' };
 }
 
 export function JoinPage() {
@@ -64,7 +63,7 @@ export function JoinPage() {
     const verifyResult = await verifyTicket(normalizedTicket);
     setVerifying(false);
 
-    if (!verifyResult.valid || !verifyResult.identity) {
+    if (!verifyResult.valid) {
       setTicketError(verifyResult.error || 'Ticket无效');
       try {
         const storedTicket = localStorage.getItem(STORAGE_KEYS.ticket)?.trim().toUpperCase() || '';
