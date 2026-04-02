@@ -106,6 +106,4 @@ export interface ErrorResponse {
     | 'INTERNAL_ERROR';
 }
 
-export type SocketResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: ErrorResponse };
+export type SocketResult<T> = { success: true; data: T } | { success: false; error: ErrorResponse };

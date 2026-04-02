@@ -1,4 +1,10 @@
 import { MeetingPageDefinition, MeetingPageKind, PageSubmissionMode } from './types';
+import {
+  getPageKindConfig,
+  normalizePageTitle,
+  resolveShowcaseRankingEnabled,
+  resolveShowcaseSubmissionMode,
+} from './pageCatalog';
 
 export function createDefaultMeetingPages(): MeetingPageDefinition[] {
   return [];
@@ -15,15 +21,17 @@ export function createNewPage(
   orderNumber: number,
   options?: PageCreateOptions,
 ): MeetingPageDefinition {
+  const baseConfig = getPageKindConfig(kind);
+  const title = normalizePageTitle(options?.title, kind, orderNumber);
+
   if (kind === 'showcase') {
-    const submissionMode = options?.submissionMode ?? 'url';
-    const rankingEnabled = options?.rankingEnabled ?? true;
-    const customTitle = options?.title?.trim().slice(0, 64);
+    const submissionMode = resolveShowcaseSubmissionMode(options?.submissionMode);
+    const rankingEnabled = resolveShowcaseRankingEnabled(options?.rankingEnabled);
     return {
       id: createPageId(),
       kind: 'showcase',
-      theme: 3,
-      title: customTitle || `互动页 ${orderNumber}`,
+      theme: baseConfig.theme,
+      title,
       submissionMode,
       rankingEnabled,
     };
@@ -31,8 +39,8 @@ export function createNewPage(
   return {
     id: createPageId(),
     kind: 'canvas',
-    theme: 1,
-    title: options?.title?.trim().slice(0, 64) || `自由画布 ${orderNumber}`,
+    theme: baseConfig.theme,
+    title,
   };
 }
 

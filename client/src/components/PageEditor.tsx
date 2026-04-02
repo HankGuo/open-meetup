@@ -64,22 +64,16 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
       return;
     }
 
-    const snapshot =
-      latestSnapshotRef.current || {
-        elements: api.getSceneElements(),
-        appState: api.getAppState(),
-        files: api.getFiles(),
-      };
+    const snapshot = latestSnapshotRef.current || {
+      elements: api.getSceneElements(),
+      appState: api.getAppState(),
+      files: api.getFiles(),
+    };
 
     const normalizedAppState = lockViewportAppState(snapshot.appState);
     const normalizedElements = constrainElementsToViewport(snapshot.elements, normalizedAppState);
     const { serializeAsJSON } = await import('@excalidraw/excalidraw');
-    const serializedScene = serializeAsJSON(
-      normalizedElements,
-      normalizedAppState,
-      snapshot.files,
-      'local',
-    );
+    const serializedScene = serializeAsJSON(normalizedElements, normalizedAppState, snapshot.files, 'local');
 
     const success = await updatePageContent(pageId, {
       type: 'canvas',
@@ -112,8 +106,12 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
         <header className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-4 py-3 md:px-5">
           <div>
             <p className="section-title">Canvas Editor</p>
-            <h3 className="text-base font-bold text-[var(--text)] md:text-lg">Excalidraw 编辑器 · 第 {pageIndex + 1} 页</h3>
-            <p className="mt-1 text-xs text-[var(--text-soft)]">编辑态显示网格；保存后在播放态将自动隐藏网格。</p>
+            <h3 className="text-base font-bold text-[var(--text)] md:text-lg">
+              Excalidraw 编辑器 · 第 {pageIndex + 1} 页
+            </h3>
+            <p className="mt-1 text-xs text-[var(--text-soft)]">
+              编辑态显示网格；保存后在播放态将自动隐藏网格。
+            </p>
           </div>
           <button
             type="button"
@@ -128,7 +126,9 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
         <div className="min-h-0 flex-1 bg-[var(--panel-light)]">
           <Suspense
             fallback={
-              <div className="flex h-full w-full items-center justify-center text-sm text-[var(--text-soft)]">画布加载中...</div>
+              <div className="flex h-full w-full items-center justify-center text-sm text-[var(--text-soft)]">
+                画布加载中...
+              </div>
             }
           >
             <ExcalidrawCanvas
@@ -198,11 +198,7 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
           </button>
           <div className="flex-1" />
           {editorError && <p className="text-xs text-rose-600">{editorError}</p>}
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-base btn-secondary h-10"
-          >
+          <button type="button" onClick={onClose} className="btn-base btn-secondary h-10">
             取消
           </button>
           <button
@@ -220,7 +216,9 @@ export function PageEditor({ pageId, pageIndex, onClose }: PageEditorProps) {
   );
 }
 
-function lockViewportAppState<T extends { scrollX: number; scrollY: number; zoom: { value: number } }>(appState: T): T;
+function lockViewportAppState<T extends { scrollX: number; scrollY: number; zoom: { value: number } }>(
+  appState: T,
+): T;
 function lockViewportAppState(appState: null | undefined): undefined;
 function lockViewportAppState<T extends { scrollX: number; scrollY: number; zoom: { value: number } }>(
   appState: T | null | undefined,

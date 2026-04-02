@@ -37,6 +37,10 @@ interface PagesUpdatePayload {
   pages: MeetingPageDefinition[];
 }
 
+interface LayoutImportPayload {
+  template: unknown;
+}
+
 export function registerHandlers(io: Server, roomManager: RoomManager) {
   io.use((socket, next) => {
     const auth = socket.handshake.auth as Partial<ReconnectPayload> | undefined;
@@ -94,11 +98,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
 
     socket.on('room:join', (payload: JoinRoomPayload, callback?: AckFn<SocketResult<unknown>>) => {
       try {
-        const result = roomManager.joinRoom(
-          payload?.userName ?? '',
-          socket.id,
-          payload?.ticket,
-        );
+        const result = roomManager.joinRoom(payload?.userName ?? '', socket.id, payload?.ticket);
         if (!result.success) {
           ack(callback, result);
           return;
@@ -269,27 +269,30 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       ack(callback, { success: true, data: null });
     });
 
-    socket.on('pages:update', async (payload: PagesUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
-      try {
-        const identity = getSocketIdentity(socket);
-        if (!identity) {
-          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-          return;
-        }
+    socket.on(
+      'pages:update',
+      async (payload: PagesUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
+        try {
+          const identity = getSocketIdentity(socket);
+          if (!identity) {
+            ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+            return;
+          }
 
-        const result = await roomManager.updatePages(identity, payload?.pages ?? []);
-        if (!result.success) {
+          const result = await roomManager.updatePages(identity, payload?.pages ?? []);
+          if (!result.success) {
+            ack(callback, result);
+            return;
+          }
+
+          broadcastRoomState(io, roomManager);
           ack(callback, result);
-          return;
+        } catch (error) {
+          console.error('[Socket] pages:update error:', error);
+          ack(callback, failure('Failed to update pages', 'INTERNAL_ERROR'));
         }
-
-        broadcastRoomState(io, roomManager);
-        ack(callback, result);
-      } catch (error) {
-        console.error('[Socket] pages:update error:', error);
-        ack(callback, failure('Failed to update pages', 'INTERNAL_ERROR'));
-      }
-    });
+      },
+    );
 
     socket.on('page:update', (payload: PageUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
       const identity = getSocketIdentity(socket);
@@ -300,7 +303,10 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
 
       const pageId = payload?.pageId ?? '';
       const content = payload.content
-        ? { type: payload.content.type as 'canvas' | 'image' | 'url' | 'html' | 'markdown', content: payload.content.content }
+        ? {
+            type: payload.content.type as 'canvas' | 'image' | 'url' | 'html' | 'markdown',
+            content: payload.content.content,
+          }
         : null;
 
       const result = roomManager.updatePageContent(identity, pageId, content);
@@ -339,6 +345,31 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         ack(callback, failure('Failed to submit work', 'INTERNAL_ERROR'));
       }
     });
+
+    socket.on(
+      'layout:import',
+      async (payload: LayoutImportPayload, callback?: AckFn<SocketResult<unknown>>) => {
+        try {
+          const identity = getSocketIdentity(socket);
+          if (!identity) {
+            ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+            return;
+          }
+
+          const result = await roomManager.importLayoutTemplate(identity, payload?.template);
+          if (!result.success) {
+            ack(callback, result);
+            return;
+          }
+
+          broadcastRoomState(io, roomManager);
+          ack(callback, result);
+        } catch (error) {
+          console.error('[Socket] layout:import error:', error);
+          ack(callback, failure('Failed to import layout template', 'INTERNAL_ERROR'));
+        }
+      },
+    );
 
     socket.on('disconnect', (reason) => {
       const disconnected = roomManager.onSocketDisconnected(socket.id);

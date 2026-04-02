@@ -7,20 +7,38 @@
     "client"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "cd server && npm run dev",
-    "dev:client": "cd client && npm run dev",
-    "dev:restart": "bash ./scripts/dev-restart.sh",
-    "dev:stop": "bash ./scripts/dev-stop.sh",
-    "lan:up": "bash ./scripts/lan-up.sh",
-    "lan:down": "bash ./scripts/lan-down.sh",
-    "lan:logs": "bash ./scripts/lan-logs.sh",
-    "test": "npm run build && node --test server/test/*.test.js",
+    "start": "node ./scripts/meetup-cli.cjs start",
+    "stop": "node ./scripts/meetup-cli.cjs stop",
+    "logs": "node ./scripts/meetup-cli.cjs logs",
+    "test": "npm run build && npm run test:server && npm run test:client",
+    "test:server": "node --test server/test/*.test.js",
+    "test:client": "npm run test --workspace client",
     "build": "cd server && npm run build && cd ../client && npm run build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier . --check",
+    "format:write": "prettier . --write",
+    "prepare": "husky",
+    "lint-staged": "lint-staged",
     "install:all": "npm install && cd server && npm install && cd ../client && npm install",
     "sim:bulk-join": "node scripts/bulk-join-simulator/simulate-bulk-join.cjs"
   },
+  "lint-staged": {
+    "*.{js,cjs,mjs,ts,tsx,css,json,md}": [
+      "prettier --write"
+    ],
+    "*.{js,cjs,mjs,ts,tsx}": [
+      "eslint --fix"
+    ]
+  },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "@eslint/js": "^9.37.0",
+    "eslint": "^9.37.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.4",
+    "prettier": "^3.6.2",
+    "typescript-eslint": "^8.46.1"
   }
 }

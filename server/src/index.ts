@@ -10,6 +10,7 @@ import { createAssetStorage } from './assetStorage';
 const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 const SOCKET_MAX_HTTP_BUFFER_SIZE_BYTES = 25 * 1024 * 1024;
+const IMAGE_UPLOAD_MAX_BYTES = 2_000_000;
 const ROOM_CLEANUP_INTERVAL_MS = Number(process.env.ROOM_CLEANUP_INTERVAL_MS || 30_000);
 const TICKET_CHECK_RATE_LIMIT_WINDOW_MS = 60_000;
 const TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS = Number(process.env.TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS || 60);
@@ -36,14 +37,51 @@ app.use(
 );
 app.use(express.json());
 
+app.post(
+  '/api/uploads/image',
+  express.raw({ type: () => true, limit: IMAGE_UPLOAD_MAX_BYTES }),
+  async (req, res) => {
+    const ticket = resolveTicketHeader(req.headers['x-open-meetup-ticket']);
+    if (!ticket) {
+      res.status(400).json({ error: 'Ticket is required.' });
+      return;
+    }
+
+    const mimeType = normalizeMimeType(req.headers['content-type']);
+    if (!mimeType.startsWith('image/')) {
+      res.status(400).json({ error: 'Only image upload is supported.' });
+      return;
+    }
+
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (buffer.length === 0) {
+      res.status(400).json({ error: 'Image payload is empty.' });
+      return;
+    }
+
+    try {
+      const result = await roomManager.uploadImageByTicket(ticket, mimeType, buffer);
+      if (!result.success) {
+        const statusCode = result.error.code === 'NOT_AUTHORIZED' ? 403 : 400;
+        res.status(statusCode).json({ error: result.error.message, code: result.error.code });
+        return;
+      }
+      res.json({ url: result.data.url });
+    } catch (error) {
+      console.error('[HTTP] image upload failed', error);
+      res.status(500).json({ error: 'Image upload failed.' });
+    }
+  },
+);
+
 const assetStorage = createAssetStorage();
 const roomManager = new RoomManager(undefined, assetStorage);
 registerHandlers(io, roomManager);
 const ticketCheckRateState = new Map<string, { windowStart: number; count: number }>();
 
 app.get('/uploads/:roomId/:fileName', async (req, res) => {
-  const roomId = sanitizeUploadPathSegment(req.params.roomId);
-  const fileName = sanitizeUploadPathSegment(req.params.fileName);
+  const roomId = sanitizeUploadRoomId(req.params.roomId);
+  const fileName = sanitizeUploadFileName(req.params.fileName);
   if (!roomId || !fileName) {
     res.status(404).json({ error: 'Asset not found' });
     return;
@@ -119,9 +157,7 @@ server.listen(PORT, HOST, () => {
   const bindUrl = `http://${HOST}:${PORT}`;
   const localUrl = `http://localhost:${PORT}`;
   const networkHint =
-    HOST === '0.0.0.0'
-      ? `Use your LAN IP: http://<your-ip>:${PORT}`
-      : `Use bind host: ${bindUrl}`;
+    HOST === '0.0.0.0' ? `Use your LAN IP: http://<your-ip>:${PORT}` : `Use bind host: ${bindUrl}`;
 
   console.log(`
 🚀 Open Meetup Server running on:
@@ -260,7 +296,7 @@ function resolveCorsOriginSetting(rawValue: string | undefined): true | string[]
   }
   if (normalized === '*') {
     if (IS_PRODUCTION) {
-      throw new Error('[Config] CORS_ALLOW_ORIGIN cannot be \"*\" in production. Please set explicit origins.');
+      throw new Error('[Config] CORS_ALLOW_ORIGIN cannot be "*" in production. Please set explicit origins.');
     }
     return true;
   }
@@ -280,11 +316,12 @@ function resolveCorsOriginSetting(rawValue: string | undefined): true | string[]
 
 function getTicketCheckRateLimitKey(req: Request): string {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 120) : 'unknown';
+  const userAgent =
+    typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 120) : 'unknown';
   return `${ip}:${userAgent}`;
 }
 
-function sanitizeUploadPathSegment(segment: unknown): string {
+function sanitizeUploadRoomId(segment: unknown): string {
   if (typeof segment !== 'string') {
     return '';
   }
@@ -292,8 +329,42 @@ function sanitizeUploadPathSegment(segment: unknown): string {
   if (!trimmed) {
     return '';
   }
-  if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) {
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(trimmed)) {
     return '';
   }
   return trimmed;
+}
+
+function sanitizeUploadFileName(segment: unknown): string {
+  if (typeof segment !== 'string') {
+    return '';
+  }
+  const trimmed = segment.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (!/^[a-zA-Z0-9_-]{1,128}\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(trimmed)) {
+    return '';
+  }
+  return trimmed;
+}
+
+function resolveTicketHeader(value: unknown): string {
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'string' ? value[0].trim().toUpperCase() : '';
+  }
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().toUpperCase();
+}
+
+function normalizeMimeType(value: unknown): string {
+  if (Array.isArray(value)) {
+    return normalizeMimeType(value[0]);
+  }
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.split(';', 1)[0]?.trim().toLowerCase() ?? '';
 }

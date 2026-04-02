@@ -34,8 +34,6 @@ export function ContentViewer({ pageId, pageIndex, pageTitle, totalPages }: Cont
   const sceneKey = `${pageIndex}-${sceneVersion}`;
 
   useEffect(() => {
-    // Excalidraw only consumes initialData on mount.
-    // Remount viewer scene whenever server-synced content changes.
     setSceneVersion((prev) => prev + 1);
   }, [content, pageIndex, pageId]);
 
@@ -43,7 +41,9 @@ export function ContentViewer({ pageId, pageIndex, pageTitle, totalPages }: Cont
     <div className="h-full w-full p-3 md:p-4">
       <section className="playback-excalidraw relative h-full w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[linear-gradient(170deg,var(--panel-light),var(--panel-soft))] shadow-[var(--shadow-1)]">
         <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[78%] items-center gap-2">
-          <span className="status-pill shrink-0">第 {pageIndex + 1} / {totalPages} 页</span>
+          <span className="status-pill shrink-0">
+            第 {pageIndex + 1} / {totalPages} 页
+          </span>
           <span className="status-pill truncate" title={pageTitle}>
             {pageTitle}
           </span>
@@ -60,7 +60,9 @@ export function ContentViewer({ pageId, pageIndex, pageTitle, totalPages }: Cont
         <div className="h-full w-full">
           <Suspense
             fallback={
-              <div className="flex h-full w-full items-center justify-center text-sm text-[var(--text-soft)]">画布加载中...</div>
+              <div className="flex h-full w-full items-center justify-center text-sm text-[var(--text-soft)]">
+                画布加载中...
+              </div>
             }
           >
             <ExcalidrawCanvas
@@ -136,7 +138,9 @@ function lockViewerScene(
   });
 }
 
-function lockViewportAppState<T extends { scrollX: number; scrollY: number; zoom: { value: number } }>(appState: T): T {
+function lockViewportAppState<T extends { scrollX: number; scrollY: number; zoom: { value: number } }>(
+  appState: T,
+): T {
   const shouldLock =
     Math.abs(appState.scrollX) > LOCKED_SCROLL_EPSILON ||
     Math.abs(appState.scrollY) > LOCKED_SCROLL_EPSILON ||

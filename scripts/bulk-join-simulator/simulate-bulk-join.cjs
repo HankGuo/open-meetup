@@ -146,7 +146,9 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`\nOpen Meetup 批量加入模拟器\n\n用法:\n  node scripts/bulk-join-simulator/simulate-bulk-join.cjs [选项]\n\n选项:\n  --count <n>             模拟人数（默认: ${DEFAULTS.count}）\n  --server <url>          服务端地址（默认: ${DEFAULTS.server}）\n  --spread-ms <ms>        每个用户启动间隔（默认: ${DEFAULTS.spreadMs}ms）\n  --timeout-ms <ms>       单用户加入超时（默认: ${DEFAULTS.timeoutMs}ms）\n  --keep-alive-ms <ms>    模拟成功后保持在线时长（默认: ${DEFAULTS.keepAliveMs}ms）\n  --auto-create-room      无房间时自动创建房间\n  --host-name <name>      自动建房时主持人昵称\n  --room-title <title>    自动建房时房间标题\n  --host-password <pwd>   自动建房时主持人口令\n  --user-prefix <prefix>  模拟用户名前缀（默认: ${DEFAULTS.userPrefix}）\n  --end-room-on-exit      退出时结束自动创建的房间\n  -h, --help              查看帮助\n`);
+  console.log(
+    `\nOpen Meetup 批量加入模拟器\n\n用法:\n  node scripts/bulk-join-simulator/simulate-bulk-join.cjs [选项]\n\n选项:\n  --count <n>             模拟人数（默认: ${DEFAULTS.count}）\n  --server <url>          服务端地址（默认: ${DEFAULTS.server}）\n  --spread-ms <ms>        每个用户启动间隔（默认: ${DEFAULTS.spreadMs}ms）\n  --timeout-ms <ms>       单用户加入超时（默认: ${DEFAULTS.timeoutMs}ms）\n  --keep-alive-ms <ms>    模拟成功后保持在线时长（默认: ${DEFAULTS.keepAliveMs}ms）\n  --auto-create-room      无房间时自动创建房间\n  --host-name <name>      自动建房时主持人昵称\n  --room-title <title>    自动建房时房间标题\n  --host-password <pwd>   自动建房时主持人口令\n  --user-prefix <prefix>  模拟用户名前缀（默认: ${DEFAULTS.userPrefix}）\n  --end-room-on-exit      退出时结束自动创建的房间\n  -h, --help              查看帮助\n`,
+  );
 }
 
 async function fetchRoomState(serverUrl) {
@@ -166,11 +168,16 @@ async function createRoom(options) {
 
   try {
     await waitForConnect(socket, options.timeoutMs);
-    const response = await emitWithAck(socket, 'room:create', {
-      userName: options.hostName,
-      title: options.roomTitle,
-      password: options.hostPassword,
-    }, options.timeoutMs);
+    const response = await emitWithAck(
+      socket,
+      'room:create',
+      {
+        userName: options.hostName,
+        title: options.roomTitle,
+        password: options.hostPassword,
+      },
+      options.timeoutMs,
+    );
 
     if (!response?.success) {
       const code = response?.error?.code || 'UNKNOWN';
@@ -214,7 +221,7 @@ async function simulateParticipants(options, signalState) {
         failures.push({ userName, code: result.code, message: result.message });
         console.log(`[join:failed] ${userName} -> ${result.code}: ${result.message}`);
       }
-    })()
+    })(),
   );
 
   await Promise.all(tasks);
@@ -308,7 +315,7 @@ async function gracefulShutdown(context) {
         } finally {
           socket.disconnect();
         }
-      })
+      }),
     );
   }
 

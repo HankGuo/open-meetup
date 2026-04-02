@@ -49,7 +49,9 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
 
   const host = sortedParticipants.find((participant) => participant.userId === hostId) ?? null;
   const me = sortedParticipants.find((participant) => participant.userId === myUserId) ?? null;
-  const others = sortedParticipants.filter((participant) => participant.userId !== hostId && participant.userId !== myUserId);
+  const others = sortedParticipants.filter(
+    (participant) => participant.userId !== hostId && participant.userId !== myUserId,
+  );
   const hostAndMeAreSame = host && me && host.userId === me.userId;
   const onlineCount = sortedParticipants.filter((participant) => participant.online).length;
   const menuMembers = sortedParticipants.slice(0, MENU_LIMIT);
@@ -93,7 +95,12 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
 
                 <div className="hidden min-w-0 flex-1 items-center -space-x-1.5 sm:flex">
                   {previewParticipants.map((participant, index) => {
-                    const tone = index === 0 ? 'border-amber-300' : index === 1 && !hostAndMeAreSame ? 'border-indigo-300' : 'border-[var(--border)]';
+                    const tone =
+                      index === 0
+                        ? 'border-amber-300'
+                        : index === 1 && !hostAndMeAreSame
+                          ? 'border-indigo-300'
+                          : 'border-[var(--border)]';
                     return (
                       <AvatarCircle
                         key={participant.userId}
@@ -108,7 +115,9 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                   在线 {onlineCount}/{sortedParticipants.length}
                 </span>
 
-                <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--text-soft)] transition ${showMenu ? 'rotate-180' : ''}`} />
+                <ChevronDown
+                  className={`h-3.5 w-3.5 shrink-0 text-[var(--text-soft)] transition ${showMenu ? 'rotate-180' : ''}`}
+                />
               </button>
 
               {showMenu ? (
@@ -134,14 +143,23 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                           key={participant.userId}
                           className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-[var(--panel-soft)]"
                         >
-                          <span className="w-5 text-center text-[11px] text-[var(--text-soft)]">{index + 1}</span>
-                          <AvatarCircle participant={participant} sizeClassName="h-7 w-7 border border-[var(--border)]" />
+                          <span className="w-5 text-center text-[11px] text-[var(--text-soft)]">
+                            {index + 1}
+                          </span>
+                          <AvatarCircle
+                            participant={participant}
+                            sizeClassName="h-7 w-7 border border-[var(--border)]"
+                          />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs font-semibold text-[var(--text)]">{participant.userName}</p>
+                            <p className="truncate text-xs font-semibold text-[var(--text)]">
+                              {participant.userName}
+                            </p>
                             <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--text-soft)]">
                               {isHost ? <Crown className="h-3 w-3 text-amber-500" /> : null}
                               <span>{isHost ? '主持人' : isMe ? '我' : '参与者'}</span>
-                              <CircleDot className={`h-2.5 w-2.5 ${participant.online ? 'text-emerald-500' : 'text-[var(--text-soft)]'}`} />
+                              <CircleDot
+                                className={`h-2.5 w-2.5 ${participant.online ? 'text-emerald-500' : 'text-[var(--text-soft)]'}`}
+                              />
                               <span>{participant.online ? '在线' : '离线'}</span>
                             </div>
                           </div>
@@ -172,8 +190,14 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
       </div>
 
       {showFullList ? (
-        <div className="dialog-overlay fixed inset-0 z-50 flex items-start justify-center p-4 pt-20" onClick={() => setShowFullList(false)}>
-          <div className="dialog-panel w-full max-w-2xl overflow-hidden" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="dialog-overlay fixed inset-0 z-50 flex items-start justify-center p-4 pt-20"
+          onClick={() => setShowFullList(false)}
+        >
+          <div
+            className="dialog-panel w-full max-w-2xl overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
               <h3 className="text-base font-semibold text-[var(--text)]">完整人员名单（按加入时间）</h3>
               <button
@@ -191,13 +215,18 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                 const isMe = participant.userId === myUserId;
 
                 return (
-                  <div key={participant.userId} className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0">
+                  <div
+                    key={participant.userId}
+                    className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0"
+                  >
                     <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--panel-soft)] text-xs font-semibold text-[var(--text-soft)]">
                       {index + 1}
                     </div>
                     <AvatarCircle participant={participant} sizeClassName="h-10 w-10" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-[var(--text)]">{participant.userName}</p>
+                      <p className="truncate text-sm font-semibold text-[var(--text)]">
+                        {participant.userName}
+                      </p>
                       <div className="mt-1 flex items-center gap-2">
                         {isHost ? (
                           <span className="rounded-full border border-amber-300 bg-amber-100/80 px-2 py-0.5 text-xs font-medium text-amber-700">
@@ -211,7 +240,9 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                         ) : null}
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                            participant.online ? 'bg-emerald-100 text-emerald-700' : 'bg-[var(--panel-soft)] text-[var(--text-soft)]'
+                            participant.online
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-[var(--panel-soft)] text-[var(--text-soft)]'
                           }`}
                         >
                           {participant.online ? '在线' : '离线'}
@@ -232,13 +263,7 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
 function AvatarCircle({ participant, sizeClassName }: { participant: User | null; sizeClassName: string }) {
   const fallbackText = getFallbackAvatarText(participant);
 
-  return (
-    <div
-      className={`${sizeClassName} avatar-fallback text-[11px] font-semibold`}
-    >
-      {fallbackText}
-    </div>
-  );
+  return <div className={`${sizeClassName} avatar-fallback text-[11px] font-semibold`}>{fallbackText}</div>;
 }
 
 function getFallbackAvatarText(participant: User | null): string {

@@ -1,7 +1,17 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { emitWithAck, initSocket } from '../socket';
 import {
   MeetingContextType,
+  LayoutTemplate,
   MeetingPageDefinition,
   MeetingPhase,
   PageContent,
@@ -128,7 +138,13 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
   const handleReconnectFailure = useCallback(
     (errorData?: SocketError) => {
       const code = errorData?.code;
-      if (code === 'ROOM_NOT_FOUND' || code === 'SESSION_EXPIRED' || code === 'USER_NOT_FOUND' || code === 'ROOM_CLOSED' || code === 'BAD_REQUEST') {
+      if (
+        code === 'ROOM_NOT_FOUND' ||
+        code === 'SESSION_EXPIRED' ||
+        code === 'USER_NOT_FOUND' ||
+        code === 'ROOM_CLOSED' ||
+        code === 'BAD_REQUEST'
+      ) {
         clearSession();
         resetRoomState();
       }
@@ -172,7 +188,10 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     reconnectingRef.current = true;
     setIsReconnecting(true);
 
-    const response = (await safeEmit('room:reconnect', currentSession)) as SocketResponse<RoomSyncData> | null;
+    const response = (await safeEmit(
+      'room:reconnect',
+      currentSession,
+    )) as SocketResponse<RoomSyncData> | null;
     if (!response) {
       reconnectingRef.current = false;
       setIsReconnecting(false);
@@ -196,7 +215,12 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
         return false;
       }
 
-      const response = (await safeEmit('room:create', { userName, title, password, participantLimit })) as SocketResponse<RoomSyncData> | null;
+      const response = (await safeEmit('room:create', {
+        userName,
+        title,
+        password,
+        participantLimit,
+      })) as SocketResponse<RoomSyncData> | null;
       if (!response) {
         return false;
       }
@@ -209,9 +233,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       if (response.data.ticket) {
         try {
           localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
-        } catch {
-          // ignore storage failure
-        }
+        } catch {}
       }
       return true;
     },
@@ -241,9 +263,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       if (response.data.ticket) {
         try {
           localStorage.setItem(STORAGE_KEYS.ticket, response.data.ticket);
-        } catch {
-          // ignore storage failure
-        }
+        } catch {}
       }
       return true;
     },
@@ -368,7 +388,10 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
   const updatePageContent = useCallback(
     async (pageId: string, content: PageContent | null): Promise<boolean> => {
-      const response = (await safeEmit('page:update', { pageId, content })) as SocketResponse<RoomSyncData> | null;
+      const response = (await safeEmit('page:update', {
+        pageId,
+        content,
+      })) as SocketResponse<RoomSyncData> | null;
       if (!response) {
         return false;
       }
@@ -383,7 +406,9 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
 
   const updatePages = useCallback(
     async (nextPages: MeetingPageDefinition[]): Promise<boolean> => {
-      const response = (await safeEmit('pages:update', { pages: nextPages })) as SocketResponse<RoomSyncData> | null;
+      const response = (await safeEmit('pages:update', {
+        pages: nextPages,
+      })) as SocketResponse<RoomSyncData> | null;
       if (!response) {
         return false;
       }
@@ -396,9 +421,28 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     [handleSocketFailure, safeEmit],
   );
 
+  const importLayoutTemplate = useCallback(
+    async (template: LayoutTemplate): Promise<boolean> => {
+      const response = (await safeEmit('layout:import', { template })) as SocketResponse<RoomSyncData> | null;
+      if (!response) {
+        return false;
+      }
+      if (!response.success) {
+        handleSocketFailure(response.error, '导入编排模板失败');
+        return false;
+      }
+      return true;
+    },
+    [handleSocketFailure, safeEmit],
+  );
+
   const submitMyWork = useCallback(
     async (pageId: string, url: string, description: string): Promise<boolean> => {
-      const response = (await safeEmit('work:submit', { pageId, url, description })) as SocketResponse<RoomSyncData> | null;
+      const response = (await safeEmit('work:submit', {
+        pageId,
+        url,
+        description,
+      })) as SocketResponse<RoomSyncData> | null;
       if (!response) {
         return false;
       }
@@ -484,6 +528,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     nextStep,
     updatePageContent,
     updatePages,
+    importLayoutTemplate,
     submitMyWork,
     clearError,
   };

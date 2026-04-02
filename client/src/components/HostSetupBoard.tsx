@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Copy,
+  Download,
   GripVertical,
   Image as ImageIcon,
   LayoutGrid,
@@ -15,11 +16,13 @@ import {
   Sparkles,
   Ticket,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { createNewPage } from '../meetingConfig';
-import { MeetingPageDefinition, PageSubmissionMode } from '../types';
+import { getDefaultPageTitle as getDefaultPageTitleByKind } from '../pageCatalog';
+import { LayoutTemplate, MeetingPageDefinition, PageSubmissionMode } from '../types';
 import { PageEditor } from './PageEditor';
 
 interface HostSetupBoardProps {
@@ -47,14 +50,16 @@ export function HostSetupBoard({
   onLeaveRoom,
   onEndRoom,
 }: HostSetupBoardProps) {
-  const { pages, updatePages, startLive, isConnected } = useMeeting();
+  const { pages, pageContents, updatePages, importLayoutTemplate, startLive, isConnected } = useMeeting();
   const [draftPages, setDraftPages] = useState<MeetingPageDefinition[]>(pages);
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [importingTemplate, setImportingTemplate] = useState(false);
   const [draggingPageId, setDraggingPageId] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
   const appliedDefaultSelectionRef = useRef<string | null>(null);
+  const templateFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [showCreateShowcaseDialog, setShowCreateShowcaseDialog] = useState(false);
   const [newShowcaseMode, setNewShowcaseMode] = useState<PageSubmissionMode>('url');
@@ -93,7 +98,11 @@ export function HostSetupBoard({
     }
   }
 
-  function reorderPages(list: MeetingPageDefinition[], fromId: string, toId: string): MeetingPageDefinition[] {
+  function reorderPages(
+    list: MeetingPageDefinition[],
+    fromId: string,
+    toId: string,
+  ): MeetingPageDefinition[] {
     if (fromId === toId) {
       return list;
     }
@@ -188,6 +197,72 @@ export function HostSetupBoard({
     setStarting(false);
   }
 
+  function buildTemplateData(): LayoutTemplate {
+    const validPageIds = new Set(draftPages.map((page) => page.id));
+    const filteredContents = Array.from(pageContents.entries()).filter(([pageId]) =>
+      validPageIds.has(pageId),
+    );
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      pages: draftPages,
+      pageContents: filteredContents,
+    };
+  }
+
+  function handleExportTemplate() {
+    try {
+      const templateData = buildTemplateData();
+      const serialized = JSON.stringify(templateData, null, 2);
+      const fileBlob = new Blob([serialized], { type: 'application/json' });
+      const objectUrl = URL.createObjectURL(fileBlob);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      link.href = objectUrl;
+      link.download = `open-meetup-layout-${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      alert('导出编排模板失败，请重试。');
+    }
+  }
+
+  function handleTriggerImportTemplate() {
+    if (saving || importingTemplate) {
+      return;
+    }
+    templateFileInputRef.current?.click();
+  }
+
+  async function handleImportTemplateFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      alert('模板文件不是有效的 JSON。');
+      return;
+    }
+
+    if (!confirm('导入模板会覆盖当前编排（页面流程与页面内容），是否继续？')) {
+      return;
+    }
+
+    setImportingTemplate(true);
+    const success = await importLayoutTemplate(parsed as LayoutTemplate);
+    setImportingTemplate(false);
+    if (!success) {
+      alert('导入失败：请确认模板格式正确，并且当前处于编排阶段。');
+    }
+  }
+
   const pageCountLabel = saving ? '同步中...' : `已编排 ${draftPages.length} 页`;
   const connectionLabel = isConnected ? '连接正常' : '连接中断';
   const displayTitle = roomTitle?.trim() || '未命名房间';
@@ -222,9 +297,29 @@ export function HostSetupBoard({
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 md:px-5">
                 <div>
                   <h3 className="text-base font-semibold text-[var(--text)]">页面流程</h3>
-                  <p className="mt-1 text-xs text-[var(--text-soft)]">核心编排区域：点击卡片编辑，拖拽调整播放顺序。</p>
+                  <p className="mt-1 text-xs text-[var(--text-soft)]">
+                    核心编排区域：点击卡片编辑，拖拽调整播放顺序。
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTriggerImportTemplate}
+                    disabled={saving || importingTemplate}
+                    className="btn-base btn-compact btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    {importingTemplate ? '导入中...' : '导入模板'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportTemplate}
+                    disabled={saving || importingTemplate}
+                    className="btn-base btn-compact btn-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    导出模板
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleAddCanvasPage()}
@@ -251,7 +346,9 @@ export function HostSetupBoard({
                   <div className="flex h-full min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)] px-6 text-center">
                     <div className="max-w-md">
                       <p className="text-sm font-semibold text-[var(--text)]">编排台为空</p>
-                      <p className="mt-2 text-sm text-[var(--text-soft)]">当前没有页面。先新增自由画布或互动页，再开始你的房间流程编排。</p>
+                      <p className="mt-2 text-sm text-[var(--text-soft)]">
+                        当前没有页面。先新增自由画布或互动页，再开始你的房间流程编排。
+                      </p>
                     </div>
                   </div>
                 ) : (
@@ -344,7 +441,9 @@ export function HostSetupBoard({
                               className="app-input app-input-light h-9 px-3 text-sm"
                             />
                           </label>
-                          <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">{pageMeta.description}</p>
+                          <p className="mt-2 text-sm leading-6 text-[var(--text-soft)]">
+                            {pageMeta.description}
+                          </p>
 
                           <div className="mt-3 flex flex-wrap items-center gap-1.5">
                             {isShowcase ? (
@@ -363,7 +462,9 @@ export function HostSetupBoard({
                             )}
                           </div>
 
-                          <div className={`mt-4 inline-flex items-center gap-1 text-xs font-medium ${pageMeta.hintClass}`}>
+                          <div
+                            className={`mt-4 inline-flex items-center gap-1 text-xs font-medium ${pageMeta.hintClass}`}
+                          >
                             <LayoutGrid className="h-3.5 w-3.5" />
                             {page.kind === 'canvas' ? '点击进入编辑' : '播放态自动渲染（可折叠操作端）'}
                           </div>
@@ -384,14 +485,20 @@ export function HostSetupBoard({
                   <Share2 className="h-4 w-4 text-[var(--accent)]" />
                 </div>
                 <p className="mono mt-1 break-all text-sm font-semibold text-[var(--text)]">{shareAddress}</p>
-                <p className="mt-1 text-xs leading-5 text-[var(--text-soft)]">将这个地址发给同一局域网内的参与者即可进入房间。</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--text-soft)]">
+                  将这个地址发给同一局域网内的参与者即可进入房间。
+                </p>
                 <button
                   type="button"
                   onClick={() => onCopyShareAddress?.()}
                   disabled={!onCopyShareAddress}
                   className="btn-base btn-secondary mt-2.5 h-9 w-full rounded-lg px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {copiedShareAddress ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                  {copiedShareAddress ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
                   {copiedShareAddress ? '已复制地址' : '复制访问地址'}
                 </button>
               </div>
@@ -404,14 +511,20 @@ export function HostSetupBoard({
                   <Ticket className="h-4 w-4 text-[var(--accent)]" />
                 </div>
                 <p className="mono mt-1 truncate text-sm font-semibold text-[var(--text)]">{ticketCode}</p>
-                <p className="mt-1 text-xs leading-5 text-[var(--text-soft)]">更换浏览器或使用隐私模式时用于恢复主持人身份。</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--text-soft)]">
+                  更换浏览器或使用隐私模式时用于恢复主持人身份。
+                </p>
                 <button
                   type="button"
                   onClick={() => onCopyTicket?.()}
                   disabled={!onCopyTicket}
                   className="btn-base btn-secondary mt-2.5 h-9 w-full rounded-lg px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {copiedTicket ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                  {copiedTicket ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
                   {copiedTicket ? '已复制 Ticket' : '复制 Ticket'}
                 </button>
               </div>
@@ -450,11 +563,23 @@ export function HostSetupBoard({
                 </button>
               </div>
 
-              <p className="mt-2 text-xs text-[var(--text-soft)]">进入播放后会锁定页面结构，仅保留翻页与互动控制。</p>
+              <p className="mt-2 text-xs text-[var(--text-soft)]">
+                进入播放后会锁定页面结构，仅保留翻页与互动控制。
+              </p>
             </div>
           </aside>
         </div>
       </div>
+
+      <input
+        ref={templateFileInputRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(event) => {
+          void handleImportTemplateFile(event);
+        }}
+      />
 
       {editingPage && editingIndex >= 0 && (
         <PageEditor
@@ -467,8 +592,14 @@ export function HostSetupBoard({
       )}
 
       {showCreateShowcaseDialog ? (
-        <div className="dialog-overlay fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={() => setShowCreateShowcaseDialog(false)}>
-          <div className="dialog-panel w-full max-w-lg overflow-hidden" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="dialog-overlay fixed inset-0 z-[70] flex items-center justify-center p-4"
+          onClick={() => setShowCreateShowcaseDialog(false)}
+        >
+          <div
+            className="dialog-panel w-full max-w-lg overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
               <div>
                 <p className="text-xs font-semibold tracking-[0.08em] text-[var(--accent)]">互动页配置</p>
@@ -487,7 +618,9 @@ export function HostSetupBoard({
 
             <div className="px-5 py-4">
               <label className="block">
-                <span className="mb-1.5 block text-sm font-medium text-[var(--text)]">互动页标题（可自定义）</span>
+                <span className="mb-1.5 block text-sm font-medium text-[var(--text)]">
+                  互动页标题（可自定义）
+                </span>
                 <input
                   type="text"
                   value={newShowcaseTitle}
@@ -587,8 +720,5 @@ function getPageMeta(page: MeetingPageDefinition): {
 }
 
 function getDefaultPageTitle(page: MeetingPageDefinition): string {
-  if (page.kind === 'showcase') {
-    return '互动页';
-  }
-  return '自由画布';
+  return getDefaultPageTitleByKind(page.kind);
 }

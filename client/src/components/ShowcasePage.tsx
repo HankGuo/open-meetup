@@ -1,29 +1,61 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { ChevronLeft, ChevronRight, Crown, ExternalLink, Image as ImageIcon, Link2, Send, Upload, X } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Crown,
+  ExternalLink,
+  Image as ImageIcon,
+  Link2,
+  Send,
+  Upload,
+  X,
+} from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { ParticipantWorkSubmission, User } from '../types';
+import { buildServerApiUrl } from '../serverUrl';
 
 const MAX_IMAGE_FILE_SIZE_BYTES = 1_500_000;
 
 export function ShowcasePage() {
-  const { participants, myRole, myUserId, submitMyWork, isConnected, pages, currentStep } = useMeeting();
+  const { participants, myRole, myUserId, myTicket, submitMyWork, isConnected, pages, currentStep } =
+    useMeeting();
   const [submissionValue, setSubmissionValue] = useState('');
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [localImagePreview, setLocalImagePreview] = useState<string | null>(null);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [operationPanelCollapsed, setOperationPanelCollapsed] = useState(false);
+  const localImagePreviewRef = useRef<string | null>(null);
 
   const currentPage = pages[currentStep];
   const currentPageId = currentPage?.id ?? '';
-  const submissionMode = currentPage?.kind === 'showcase' ? currentPage.submissionMode ?? 'url' : 'url';
+  const submissionMode = currentPage?.kind === 'showcase' ? (currentPage.submissionMode ?? 'url') : 'url';
   const rankingEnabled = currentPage?.kind === 'showcase' ? currentPage.rankingEnabled !== false : true;
   const pageTitle = resolveShowcasePageTitle(currentPage?.title);
 
   useEffect(() => {
+    localImagePreviewRef.current = localImagePreview;
+  }, [localImagePreview]);
+
+  useEffect(() => {
+    return () => {
+      if (localImagePreviewRef.current) {
+        URL.revokeObjectURL(localImagePreviewRef.current);
+        localImagePreviewRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (localImagePreviewRef.current) {
+      URL.revokeObjectURL(localImagePreviewRef.current);
+      localImagePreviewRef.current = null;
+    }
     setSubmissionValue('');
+    setSelectedImageFile(null);
     setLocalImagePreview(null);
     setDescription('');
     setSubmitError(null);
@@ -47,9 +79,7 @@ export function ShowcasePage() {
           }
           return { participant, submission };
         })
-        .filter(
-          (item): item is { participant: User; submission: ParticipantWorkSubmission } => item != null,
-        ),
+        .filter((item): item is { participant: User; submission: ParticipantWorkSubmission } => item != null),
     [currentPageId, participantWorks],
   );
 
@@ -82,18 +112,20 @@ export function ShowcasePage() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (loadEvent) => {
-      const result = loadEvent.target?.result;
-      if (typeof result !== 'string' || !isBase64ImageDataUrl(result)) {
-        setSubmitError('图片解析失败，请重新上传');
-        return;
-      }
-      setSubmitError(null);
-      setSubmissionValue(result);
-      setLocalImagePreview(result);
-    };
-    reader.readAsDataURL(file);
+    const mimeType = file.type.trim().toLowerCase();
+    if (!mimeType.startsWith('image/')) {
+      setSubmitError('仅支持图片文件');
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    if (localImagePreview) {
+      URL.revokeObjectURL(localImagePreview);
+    }
+
+    setSubmitError(null);
+    setSelectedImageFile(file);
+    setLocalImagePreview(previewUrl);
   }
 
   async function handleSubmit() {
@@ -120,11 +152,20 @@ export function ShowcasePage() {
         return;
       }
     } else {
-      normalizedContent = submissionValue.trim();
-      if (!isBase64ImageDataUrl(normalizedContent)) {
+      if (!selectedImageFile) {
         setSubmitError('请先上传图片后再提交');
         return;
       }
+      if (!myTicket) {
+        setSubmitError('Ticket 缺失，请重新加入房间');
+        return;
+      }
+      const uploadedUrl = await uploadImageFile(selectedImageFile, myTicket);
+      if (!uploadedUrl) {
+        setSubmitError('图片上传失败，请稍后重试');
+        return;
+      }
+      normalizedContent = uploadedUrl;
     }
 
     setSubmitError(null);
@@ -165,7 +206,9 @@ export function ShowcasePage() {
           </div>
         </header>
 
-        <div className={`min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-4 ${operationPanelCollapsed ? 'flex' : 'grid lg:grid-cols-[320px_minmax(0,1fr)]'}`}>
+        <div
+          className={`min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-4 ${operationPanelCollapsed ? 'flex' : 'grid lg:grid-cols-[320px_minmax(0,1fr)]'}`}
+        >
           {!operationPanelCollapsed ? (
             <aside className="flex min-h-0 flex-col rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-4">
               <div className="flex items-start justify-between gap-3">
@@ -228,7 +271,9 @@ export function ShowcasePage() {
                         className="hidden"
                         disabled={!canSubmit}
                       />
-                      <span className={`btn-base btn-secondary w-full cursor-pointer ${!canSubmit ? 'pointer-events-none opacity-50' : ''}`}>
+                      <span
+                        className={`btn-base btn-secondary w-full cursor-pointer ${!canSubmit ? 'pointer-events-none opacity-50' : ''}`}
+                      >
                         <Upload className="h-4 w-4" />
                         {localImagePreview ? '重新上传图片' : '上传图片'}
                       </span>
@@ -257,7 +302,11 @@ export function ShowcasePage() {
 
               <div className="mt-3 flex items-center justify-between text-xs text-[var(--text-soft)]">
                 <span>{description.trim().length}/120</span>
-                {meSubmission?.updatedAt ? <span>上次：{new Date(meSubmission.updatedAt).toLocaleString()}</span> : <span>尚未提交</span>}
+                {meSubmission?.updatedAt ? (
+                  <span>上次：{new Date(meSubmission.updatedAt).toLocaleString()}</span>
+                ) : (
+                  <span>尚未提交</span>
+                )}
               </div>
 
               {submitError ? <p className="mt-2 text-xs text-[var(--danger)]">{submitError}</p> : null}
@@ -330,7 +379,11 @@ export function ShowcasePage() {
                       {rankingEnabled && rank <= 3 ? <RankCrown rank={rank as 1 | 2 | 3} /> : null}
                       <div className="showcase-work-thumb relative h-36">
                         {isImageUrl(submission.url) ? (
-                          <img src={submission.url} alt={participant.userName} className="h-full w-full object-cover" />
+                          <img
+                            src={submission.url}
+                            alt={participant.userName}
+                            className="h-full w-full object-cover"
+                          />
                         ) : (
                           <iframe
                             src={submission.url}
@@ -350,10 +403,14 @@ export function ShowcasePage() {
                         <div className="mb-2 flex items-center gap-2">
                           <Avatar participant={participant} />
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[var(--text)]">{participant.userName}</p>
+                            <p className="truncate text-sm font-semibold text-[var(--text)]">
+                              {participant.userName}
+                            </p>
                             <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--text-soft)]">
                               <span>{participant.online ? '在线' : '离线'}</span>
-                              <span className="showcase-work-state showcase-work-state--submitted">已提交</span>
+                              <span className="showcase-work-state showcase-work-state--submitted">
+                                已提交
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -371,15 +428,22 @@ export function ShowcasePage() {
       </section>
 
       {selectedWork ? (
-        <div className="fixed inset-0 z-50 bg-[oklch(0.42_0.015_206_/0.28)] p-4 backdrop-blur-sm md:p-8" onClick={() => setSelectedParticipantId(null)}>
+        <div
+          className="fixed inset-0 z-50 bg-[oklch(0.42_0.015_206_/0.28)] p-4 backdrop-blur-sm md:p-8"
+          onClick={() => setSelectedParticipantId(null)}
+        >
           <div
             className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel-light)]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4 text-[var(--text)]">
               <div className="min-w-0">
-                <p className="truncate text-lg font-semibold">{selectedWork.participant.userName} 的提交内容</p>
-                <p className="mt-1 line-clamp-2 text-sm text-[var(--text-soft)]">{selectedWork.submission.description}</p>
+                <p className="truncate text-lg font-semibold">
+                  {selectedWork.participant.userName} 的提交内容
+                </p>
+                <p className="mt-1 line-clamp-2 text-sm text-[var(--text-soft)]">
+                  {selectedWork.submission.description}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 {isHttpUrl(selectedWork.submission.url) ? (
@@ -404,7 +468,11 @@ export function ShowcasePage() {
             </div>
             <div className="min-h-0 flex-1 bg-[var(--panel-soft)]">
               {isImageUrl(selectedWork.submission.url) ? (
-                <img src={selectedWork.submission.url} alt={selectedWork.participant.userName} className="h-full w-full object-contain" />
+                <img
+                  src={selectedWork.submission.url}
+                  alt={selectedWork.participant.userName}
+                  className="h-full w-full object-contain"
+                />
               ) : isHttpUrl(selectedWork.submission.url) ? (
                 <iframe
                   src={selectedWork.submission.url}
@@ -428,11 +496,7 @@ export function ShowcasePage() {
 function Avatar({ participant }: { participant: User }) {
   const fallback = participant.userName?.trim()?.charAt(0)?.toUpperCase() || '?';
 
-  return (
-    <div className="avatar-fallback h-9 w-9 text-xs font-semibold">
-      {fallback}
-    </div>
-  );
+  return <div className="avatar-fallback h-9 w-9 text-xs font-semibold">{fallback}</div>;
 }
 
 function RankCrown({ rank }: { rank: 1 | 2 | 3 }) {
@@ -472,11 +536,7 @@ function isHttpUrl(value: string): boolean {
 }
 
 function isImageUrl(url: string): boolean {
-  return isBase64ImageDataUrl(url) || /\.(png|jpe?g|gif|webp|svg|avif)(\?.*)?$/i.test(url);
-}
-
-function isBase64ImageDataUrl(value: string): boolean {
-  return /^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/.test(value);
+  return /\.(png|jpe?g|gif|webp|svg|avif|bmp)(\?.*)?$/i.test(url);
 }
 
 function resolveShowcasePageTitle(rawTitle: string | undefined): string {
@@ -488,4 +548,34 @@ function resolveShowcasePageTitle(rawTitle: string | undefined): string {
     return '互动页';
   }
   return title;
+}
+
+async function uploadImageFile(file: File, ticket: string): Promise<string | null> {
+  const mimeType = file.type?.trim().toLowerCase() || '';
+  if (!mimeType.startsWith('image/')) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(buildServerApiUrl('/api/uploads/image'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': mimeType,
+        'X-Open-Meetup-Ticket': ticket,
+      },
+      body: file,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as { url?: string };
+    if (typeof data.url !== 'string' || !data.url.startsWith('/uploads/')) {
+      return null;
+    }
+    return data.url;
+  } catch {
+    return null;
+  }
 }

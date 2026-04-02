@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useMeeting } from '../context/MeetingContext';
+import { getDefaultPageTitle } from '../pageCatalog';
 import { ContentViewer } from './ContentViewer';
 import { ParticipantRosterBar } from './ParticipantRosterBar';
 import { ShowcasePage } from './ShowcasePage';
@@ -11,7 +12,8 @@ interface MeetingStageProps {
 export function MeetingStage({ topActions }: MeetingStageProps) {
   const { currentStep, pages } = useMeeting();
   const currentPage = pages[currentStep];
-  const pageTitle = currentPage?.title?.trim() || '自由画布';
+  const pageTitle =
+    currentPage?.title?.trim() || (currentPage ? getDefaultPageTitle(currentPage.kind) : '自由画布');
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden pt-11 md:pt-12">

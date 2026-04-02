@@ -47,7 +47,12 @@ body {
   margin: 0;
   position: relative;
   isolation: isolate;
-  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family:
+    'DM Sans',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   color: var(--text);
   background:
     linear-gradient(oklch(0.9 0.01 196 / 0.38) 1px, transparent 1px),
@@ -157,7 +162,9 @@ textarea:focus-visible,
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: linear-gradient(160deg, oklch(1 0 0 / 0.9), var(--panel));
-    box-shadow: 0 1px 0 oklch(0.93 0.005 196 / 0.84), var(--shadow-1);
+    box-shadow:
+      0 1px 0 oklch(0.93 0.005 196 / 0.84),
+      var(--shadow-1);
     transition:
       transform 220ms ease,
       box-shadow 220ms ease,
@@ -255,7 +262,10 @@ textarea:focus-visible,
     background: oklch(1 0 0 / 0.92);
     padding: 0.7rem 0.86rem;
     color: var(--text-inverse);
-    transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+    transition:
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      background-color 160ms ease;
   }
 
   .app-input::placeholder {
@@ -405,7 +415,9 @@ textarea:focus-visible,
   }
 
   .showcase-work-card {
-    box-shadow: 0 1px 0 oklch(0.93 0.01 196 / 0.85), 0 10px 24px oklch(0.42 0.02 206 / 0.1);
+    box-shadow:
+      0 1px 0 oklch(0.93 0.01 196 / 0.85),
+      0 10px 24px oklch(0.42 0.02 206 / 0.1);
     transition:
       transform 160ms ease,
       border-color 160ms ease,
@@ -420,7 +432,9 @@ textarea:focus-visible,
 
   .showcase-work-card--submitted:hover {
     border-color: oklch(0.72 0.11 208 / 0.8);
-    box-shadow: 0 1px 0 oklch(0.91 0.02 208 / 0.84), 0 14px 28px oklch(0.44 0.05 208 / 0.2);
+    box-shadow:
+      0 1px 0 oklch(0.91 0.02 208 / 0.84),
+      0 14px 28px oklch(0.44 0.05 208 / 0.2);
   }
 
   .showcase-work-thumb {
@@ -531,7 +545,10 @@ textarea:focus-visible,
     border-radius: 10px;
     background: oklch(1 0 0 / 0.82);
     color: var(--text);
-    transition: background-color 170ms ease, border-color 170ms ease, transform 150ms ease;
+    transition:
+      background-color 170ms ease,
+      border-color 170ms ease,
+      transform 150ms ease;
   }
 
   .stage-topbar-trigger:hover {
@@ -558,7 +575,11 @@ textarea:focus-visible,
     border-radius: 9px;
     background: oklch(1 0 0 / 0.86);
     color: var(--text-soft);
-    transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 130ms ease;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      transform 130ms ease;
   }
 
   .stage-action-btn:hover {
@@ -587,7 +608,6 @@ textarea:focus-visible,
     background: oklch(0.9 0.05 28 / 0.46);
     color: oklch(0.48 0.16 28);
   }
-
 }
 
 .playback-excalidraw .excalidraw .zoom-actions,

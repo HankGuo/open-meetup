@@ -13,6 +13,7 @@ npm run sim:bulk-join
 ```
 
 默认行为：
+
 - 目标人数：35
 - 连接地址：`http://localhost:3001`
 - 只加入“当前已存在房间”
@@ -21,25 +22,25 @@ npm run sim:bulk-join
 
 ## 常用命令
 
-1) 模拟 40 人加入当前房间
+1. 模拟 40 人加入当前房间
 
 ```bash
 npm run sim:bulk-join -- --count 40
 ```
 
-2) 如果当前没有房间，自动创建后再压测
+2. 如果当前没有房间，自动创建后再压测
 
 ```bash
 npm run sim:bulk-join -- --count 35 --auto-create-room --host-password 12345678
 ```
 
-3) 保持在线 5 分钟
+3. 保持在线 5 分钟
 
 ```bash
 npm run sim:bulk-join -- --count 35 --keep-alive-ms 300000
 ```
 
-4) 结束时连自动创建的房间一起关闭
+4. 结束时连自动创建的房间一起关闭
 
 ```bash
 npm run sim:bulk-join -- --auto-create-room --end-room-on-exit

@@ -16,16 +16,12 @@ export function clearAllLocalStorage() {
     for (const key of keysToDelete) {
       localStorage.removeItem(key);
     }
-  } catch {
-    // ignore storage failure
-  }
+  } catch {}
 }
 
 export function clearRoomEntryStorage() {
   try {
     localStorage.removeItem(STORAGE_KEYS.ticket);
     localStorage.removeItem(STORAGE_KEYS.ticketAcknowledged);
-  } catch {
-    // ignore storage failure
-  }
+  } catch {}
 }

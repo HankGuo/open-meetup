@@ -6,6 +6,15 @@ const { RoomManager } = require('../dist/roomManager.js');
 const { MemoryStore } = require('../dist/store.js');
 
 const UPLOAD_ROOT = path.resolve(__dirname, '..', 'uploads');
+const IMAGE_MIME_TYPE = 'image/png';
+const FIRST_IMAGE_BUFFER = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+  'base64',
+);
+const SECOND_IMAGE_BUFFER = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAQAAADZc7J/AAAADElEQVR42mP8z8BQDwAFgwJ/lHpmsQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 function createManager() {
   return new RoomManager(new MemoryStore());
@@ -24,10 +33,24 @@ function getHostIdentity(createResult) {
 function createPagesForSetup() {
   return [
     { id: 'page-canvas-a', theme: 1, kind: 'canvas', title: '自由画布 1' },
-    { id: 'page-showcase-image-a', theme: 3, kind: 'showcase', title: '图片陈列 1', submissionMode: 'image', rankingEnabled: true },
+    {
+      id: 'page-showcase-image-a',
+      theme: 3,
+      kind: 'showcase',
+      title: '图片陈列 1',
+      submissionMode: 'image',
+      rankingEnabled: true,
+    },
     { id: 'page-canvas-b', theme: 1, kind: 'canvas', title: '自由画布 2' },
     { id: 'page-canvas-c', theme: 1, kind: 'canvas', title: '自由画布 3' },
-    { id: 'page-showcase-url-a', theme: 3, kind: 'showcase', title: '链接陈列 1', submissionMode: 'url', rankingEnabled: false },
+    {
+      id: 'page-showcase-url-a',
+      theme: 3,
+      kind: 'showcase',
+      title: '链接陈列 1',
+      submissionMode: 'url',
+      rankingEnabled: false,
+    },
     { id: 'page-canvas-d', theme: 1, kind: 'canvas', title: '自由画布 4' },
   ];
 }
@@ -36,6 +59,13 @@ async function seedPages(manager, hostIdentity, pages = createPagesForSetup()) {
   const result = await manager.updatePages(hostIdentity, pages);
   assert.equal(result.success, true);
   return pages;
+}
+
+async function uploadImageAndGetUrl(manager, ticket, buffer = FIRST_IMAGE_BUFFER) {
+  const upload = await manager.uploadImageByTicket(ticket, IMAGE_MIME_TYPE, buffer);
+  assert.equal(upload.success, true);
+  assert.ok(upload.data.url.startsWith('/uploads/'));
+  return upload.data.url;
 }
 
 test('new room should start with no preconfigured pages', async () => {
@@ -181,6 +211,81 @@ test('setup phase should allow removing all pages', async () => {
   assert.equal(removed.data.pages.length, 0);
 });
 
+test('host can import layout template in setup phase', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  await seedPages(manager, hostIdentity, createPagesForSetup().slice(0, 2));
+
+  const importedTemplate = {
+    version: 1,
+    pages: [
+      {
+        id: 'import-canvas-1',
+        theme: 1,
+        kind: 'canvas',
+        title: '导入自由画布',
+      },
+      {
+        id: 'import-showcase-1',
+        theme: 3,
+        kind: 'showcase',
+        title: '导入互动页',
+        submissionMode: 'url',
+        rankingEnabled: true,
+      },
+    ],
+    pageContents: [['import-canvas-1', { type: 'markdown', content: '# imported' }]],
+  };
+
+  const imported = await manager.importLayoutTemplate(hostIdentity, importedTemplate);
+  assert.equal(imported.success, true);
+
+  const state = manager.getStateByIdentity(hostIdentity);
+  assert.equal(state.success, true);
+  assert.deepEqual(
+    state.data.pages.map((page) => page.id),
+    ['import-canvas-1', 'import-showcase-1'],
+  );
+  const contentMap = new Map(state.data.pageContents || []);
+  assert.equal(contentMap.get('import-canvas-1')?.content, '# imported');
+});
+
+test('import layout template should be blocked during live phase', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  await seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const imported = await manager.importLayoutTemplate(hostIdentity, {
+    version: 1,
+    pages: [{ id: 'import-canvas-1', theme: 1, kind: 'canvas', title: '导入页' }],
+    pageContents: [],
+  });
+  assert.equal(imported.success, false);
+  assert.equal(imported.error.code, 'BAD_REQUEST');
+});
+
+test('import layout template should reject invalid page content reference', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  await seedPages(manager, hostIdentity, [createPagesForSetup()[0]]);
+
+  const imported = await manager.importLayoutTemplate(hostIdentity, {
+    version: 1,
+    pages: [{ id: 'import-canvas-1', theme: 1, kind: 'canvas', title: '导入页' }],
+    pageContents: [['unknown-page', { type: 'markdown', content: '# bad' }]],
+  });
+  assert.equal(imported.success, false);
+  assert.equal(imported.error.code, 'BAD_REQUEST');
+});
+
 test('ticket join should restore existing participant instead of creating duplicate', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
@@ -205,7 +310,9 @@ test('ticket join should restore existing participant instead of creating duplic
 
   const snapshot = manager.getPublicRoomSnapshot();
   assert.equal(snapshot.success, true);
-  const allParticipantsWithoutTicket = snapshot.data.participants.every((participant) => !('ticket' in participant));
+  const allParticipantsWithoutTicket = snapshot.data.participants.every(
+    (participant) => !('ticket' in participant),
+  );
   assert.equal(allParticipantsWithoutTicket, true);
 });
 
@@ -258,6 +365,64 @@ test('checkTicket should only return valid flag for host and participant tickets
 
   const invalidCheck = manager.checkTicket('TKT-NOT-EXISTS');
   assert.deepEqual(invalidCheck, { valid: false });
+});
+
+test('uploadImageByTicket should be blocked during setup phase', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+
+  const upload = await manager.uploadImageByTicket(join.data.ticket, IMAGE_MIME_TYPE, FIRST_IMAGE_BUFFER);
+  assert.equal(upload.success, false);
+  assert.equal(upload.error.code, 'BAD_REQUEST');
+
+  safeCleanupUploadRoot();
+});
+
+test('uploadImageByTicket should reject host ticket and allow participant ticket in live phase', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  await seedPages(manager, hostIdentity);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+
+  const hostUpload = await manager.uploadImageByTicket(
+    created.data.ticket,
+    IMAGE_MIME_TYPE,
+    FIRST_IMAGE_BUFFER,
+  );
+  assert.equal(hostUpload.success, false);
+  assert.equal(hostUpload.error.code, 'NOT_AUTHORIZED');
+
+  const participantUpload = await manager.uploadImageByTicket(
+    join.data.ticket,
+    IMAGE_MIME_TYPE,
+    FIRST_IMAGE_BUFFER,
+  );
+  assert.equal(participantUpload.success, true);
+  assert.equal(participantUpload.data.url.startsWith('/uploads/'), true);
+
+  const room = manager.getActiveRoom();
+  assert.ok(room);
+  const storedPath = path.resolve(__dirname, '..', participantUpload.data.url.slice(1));
+  assert.equal(fs.existsSync(storedPath), true);
+
+  const ended = await manager.forceEndRoom(hostIdentity);
+  assert.equal(ended.success, true);
+  assert.equal(fs.existsSync(storedPath), false);
+
+  safeCleanupUploadRoot();
 });
 
 test('isIdentityAuthorized should respect session match and room lifecycle', async () => {
@@ -316,7 +481,12 @@ test('participant can submit work and persist url/description fields', async () 
     sessionId: join.data.sessionId,
   };
 
-  const submit = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work', '我的 demo 作品');
+  const submit = await manager.submitWork(
+    participantIdentity,
+    urlShowcasePage.id,
+    'https://example.com/work',
+    '我的 demo 作品',
+  );
   assert.equal(submit.success, true);
 
   const snapshot = manager.getPublicRoomSnapshot();
@@ -334,7 +504,12 @@ test('host cannot submit work as participant', async () => {
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   const hostIdentity = getHostIdentity(created);
 
-  const submit = await manager.submitWork(hostIdentity, 'page-showcase-url-a', 'https://example.com/work', 'host try');
+  const submit = await manager.submitWork(
+    hostIdentity,
+    'page-showcase-url-a',
+    'https://example.com/work',
+    'host try',
+  );
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'NOT_AUTHORIZED');
 });
@@ -355,7 +530,12 @@ test('submit work should be blocked during setup phase', async () => {
     sessionId: join.data.sessionId,
   };
 
-  const submit = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work', 'setup 提交');
+  const submit = await manager.submitWork(
+    participantIdentity,
+    urlShowcasePage.id,
+    'https://example.com/work',
+    'setup 提交',
+  );
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'BAD_REQUEST');
 });
@@ -379,7 +559,12 @@ test('submit work should reject non-http urls on url-mode page', async () => {
     sessionId: join.data.sessionId,
   };
 
-  const submit = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'javascript:alert(1)', 'bad');
+  const submit = await manager.submitWork(
+    participantIdentity,
+    urlShowcasePage.id,
+    'javascript:alert(1)',
+    'bad',
+  );
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'BAD_REQUEST');
 });
@@ -403,7 +588,12 @@ test('submit work should reject non-image payload on image-mode page', async () 
     sessionId: join.data.sessionId,
   };
 
-  const submit = await manager.submitWork(participantIdentity, imageShowcasePage.id, 'https://example.com/not-image', 'bad');
+  const submit = await manager.submitWork(
+    participantIdentity,
+    imageShowcasePage.id,
+    'https://example.com/not-image',
+    'bad',
+  );
   assert.equal(submit.success, false);
   assert.equal(submit.error.code, 'BAD_REQUEST');
 });
@@ -429,12 +619,17 @@ test('submissions should be isolated by showcase page id', async () => {
     sessionId: join.data.sessionId,
   };
 
-  const submitUrl = await manager.submitWork(participantIdentity, urlShowcasePage.id, 'https://example.com/work-a', 'URL 作品');
+  const submitUrl = await manager.submitWork(
+    participantIdentity,
+    urlShowcasePage.id,
+    'https://example.com/work-a',
+    'URL 作品',
+  );
   assert.equal(submitUrl.success, true);
   const submitImage = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    await uploadImageAndGetUrl(manager, join.data.ticket),
     '图片作品',
   );
   assert.equal(submitImage.success, true);
@@ -472,13 +667,12 @@ test('image submission should be persisted as upload url and cleaned after room 
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    await uploadImageAndGetUrl(manager, join.data.ticket),
     '图片作品',
   );
   assert.equal(submit.success, true);
 
-  const storedUrl = submit.data.participants
-    .find((participant) => participant.userId === join.data.userId)
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId)
     .works[imageShowcasePage.id].url;
   assert.equal(storedUrl.startsWith('/uploads/'), true);
   assert.equal(storedUrl.startsWith('data:image/'), false);
@@ -516,22 +710,26 @@ test('replacing image submission should cleanup previous upload asset', async ()
   const firstSubmit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    await uploadImageAndGetUrl(manager, join.data.ticket),
     '第一版',
   );
   assert.equal(firstSubmit.success, true);
-  const firstStoredUrl = firstSubmit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const firstStoredUrl = firstSubmit.data.participants.find(
+    (participant) => participant.userId === join.data.userId,
+  ).works[imageShowcasePage.id].url;
   const firstStoredPath = path.resolve(__dirname, '..', firstStoredUrl.slice(1));
   assert.equal(fs.existsSync(firstStoredPath), true);
 
   const secondSubmit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAQAAADZc7J/AAAADElEQVR42mP8z8BQDwAFgwJ/lHpmsQAAAABJRU5ErkJggg==',
+    await uploadImageAndGetUrl(manager, join.data.ticket, SECOND_IMAGE_BUFFER),
     '第二版',
   );
   assert.equal(secondSubmit.success, true);
-  const secondStoredUrl = secondSubmit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const secondStoredUrl = secondSubmit.data.participants.find(
+    (participant) => participant.userId === join.data.userId,
+  ).works[imageShowcasePage.id].url;
   const secondStoredPath = path.resolve(__dirname, '..', secondStoredUrl.slice(1));
   assert.equal(fs.existsSync(secondStoredPath), true);
   assert.equal(firstStoredPath === secondStoredPath, false);
@@ -567,11 +765,12 @@ test('removing showcase page should cleanup removed image submissions', async ()
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    await uploadImageAndGetUrl(manager, join.data.ticket),
     '图片作品',
   );
   assert.equal(submit.success, true);
-  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId)
+    .works[imageShowcasePage.id].url;
   const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
   assert.equal(fs.existsSync(storedPath), true);
 
@@ -608,11 +807,12 @@ test('participant leave should cleanup uploaded image assets', async () => {
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    await uploadImageAndGetUrl(manager, join.data.ticket),
     '图片作品',
   );
   assert.equal(submit.success, true);
-  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId)
+    .works[imageShowcasePage.id].url;
   const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
   assert.equal(fs.existsSync(storedPath), true);
 
@@ -646,11 +846,12 @@ test('cleanupExpired should cleanup uploaded image assets for removed offline pa
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    await uploadImageAndGetUrl(manager, join.data.ticket),
     '图片作品',
   );
   assert.equal(submit.success, true);
-  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId)
+    .works[imageShowcasePage.id].url;
   const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
   assert.equal(fs.existsSync(storedPath), true);
 
@@ -687,11 +888,12 @@ test('switching showcase mode from image to url should cleanup incompatible uplo
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pT5QAAAAASUVORK5CYII=',
+    await uploadImageAndGetUrl(manager, join.data.ticket),
     '图片作品',
   );
   assert.equal(submit.success, true);
-  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId).works[imageShowcasePage.id].url;
+  const storedUrl = submit.data.participants.find((participant) => participant.userId === join.data.userId)
+    .works[imageShowcasePage.id].url;
   const storedPath = path.resolve(__dirname, '..', storedUrl.slice(1));
   assert.equal(fs.existsSync(storedPath), true);
 

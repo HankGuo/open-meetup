@@ -33,13 +33,21 @@ export function Lobby() {
       return;
     }
     const normalizedParticipantLimit = Math.floor(parsedLimit);
-    if (normalizedParticipantLimit < MIN_PARTICIPANT_LIMIT || normalizedParticipantLimit > MAX_PARTICIPANT_LIMIT) {
+    if (
+      normalizedParticipantLimit < MIN_PARTICIPANT_LIMIT ||
+      normalizedParticipantLimit > MAX_PARTICIPANT_LIMIT
+    ) {
       alert(`人数上限需在 ${MIN_PARTICIPANT_LIMIT}-${MAX_PARTICIPANT_LIMIT} 之间`);
       return;
     }
     clearError();
     setLoading(true);
-    const success = await createRoom(userName.trim(), title.trim(), password.trim(), normalizedParticipantLimit);
+    const success = await createRoom(
+      userName.trim(),
+      title.trim(),
+      password.trim(),
+      normalizedParticipantLimit,
+    );
     setLoading(false);
     if (!success) {
       setPassword('');
@@ -56,7 +64,9 @@ export function Lobby() {
                 <Sparkles className="h-3.5 w-3.5" />
                 生产级主持台
               </div>
-              <h1 className="text-3xl font-bold tracking-tight text-[var(--text)] md:text-4xl">Open Meetup</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-[var(--text)] md:text-4xl">
+                Open Meetup
+              </h1>
               <p className="mt-3 text-sm leading-6 text-[var(--text-soft)] md:text-[0.95rem]">
                 一键创建你的实时协作房间，先编排页面再开始播放，让房间控制和参与体验都更稳定。
               </p>
@@ -69,7 +79,9 @@ export function Lobby() {
               </div>
               <div className="app-card p-3.5">
                 <p className="text-xs text-[var(--text-soft)]">核心能力</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--text)]">自由画布 · 互动页（图片/URL，可选排名）</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--text)]">
+                  自由画布 · 互动页（图片/URL，可选排名）
+                </p>
               </div>
             </div>
           </div>
@@ -99,7 +111,9 @@ export function Lobby() {
 
             <div className="space-y-4">
               <label className="block">
-                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">您的姓名</span>
+                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">
+                  您的姓名
+                </span>
                 <input
                   type="text"
                   autoComplete="off"
@@ -113,7 +127,9 @@ export function Lobby() {
               </label>
 
               <label className="block">
-                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">房间标题</span>
+                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">
+                  房间标题
+                </span>
                 <input
                   type="text"
                   autoComplete="off"
@@ -127,7 +143,9 @@ export function Lobby() {
               </label>
 
               <label className="block">
-                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">授权口令</span>
+                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">
+                  授权口令
+                </span>
                 <input
                   type="password"
                   autoComplete="new-password"
@@ -141,7 +159,9 @@ export function Lobby() {
               </label>
 
               <label className="block">
-                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">参与者人数上限（不含主持人）</span>
+                <span className="mb-1.5 block text-sm font-semibold text-[var(--text-inverse)]">
+                  参与者人数上限（不含主持人）
+                </span>
                 <input
                   type="number"
                   min={MIN_PARTICIPANT_LIMIT}
@@ -169,7 +189,9 @@ export function Lobby() {
               </button>
             </div>
 
-            <p className="mt-5 text-center text-xs text-[var(--text-soft)]">实时协作房间 · Powered by Socket.IO</p>
+            <p className="mt-5 text-center text-xs text-[var(--text-soft)]">
+              实时协作房间 · Powered by Socket.IO
+            </p>
           </div>
         </div>
       </section>

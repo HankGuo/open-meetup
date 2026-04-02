@@ -27,6 +27,13 @@ export interface MeetingPageDefinition {
   rankingEnabled?: boolean;
 }
 
+export interface LayoutTemplate {
+  version: number;
+  pages: MeetingPageDefinition[];
+  pageContents?: Array<[string, PageContent]>;
+  exportedAt?: string;
+}
+
 export interface User {
   userId: string;
   userName: string;
@@ -60,8 +67,12 @@ export interface MeetingContextType extends RoomState {
   isReconnecting: boolean;
   error: string | null;
 
-  // Actions
-  createRoom: (userName: string, title: string, password: string, participantLimit: number) => Promise<boolean>;
+  createRoom: (
+    userName: string,
+    title: string,
+    password: string,
+    participantLimit: number,
+  ) => Promise<boolean>;
   joinRoom: (userName: string, ticket?: string) => Promise<boolean>;
   leaveRoom: () => Promise<boolean>;
   endRoom: () => Promise<boolean>;
@@ -71,6 +82,7 @@ export interface MeetingContextType extends RoomState {
   prevStep: () => Promise<boolean>;
   updatePageContent: (pageId: string, content: PageContent | null) => Promise<boolean>;
   updatePages: (pages: MeetingPageDefinition[]) => Promise<boolean>;
+  importLayoutTemplate: (template: LayoutTemplate) => Promise<boolean>;
   submitMyWork: (pageId: string, url: string, description: string) => Promise<boolean>;
   clearError: () => void;
 }
