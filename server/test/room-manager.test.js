@@ -61,8 +61,8 @@ async function seedPages(manager, hostIdentity, pages = createPagesForSetup()) {
   return pages;
 }
 
-async function uploadImageAndGetUrl(manager, ticket, buffer = FIRST_IMAGE_BUFFER) {
-  const upload = await manager.uploadImageByTicket(ticket, IMAGE_MIME_TYPE, buffer);
+async function uploadImageAndGetUrl(manager, ticket, pageId, buffer = FIRST_IMAGE_BUFFER) {
+  const upload = await manager.uploadImageByTicket(ticket, IMAGE_MIME_TYPE, buffer, pageId);
   assert.equal(upload.success, true);
   assert.ok(upload.data.url.startsWith('/uploads/'));
   return upload.data.url;
@@ -316,6 +316,43 @@ test('ticket join should restore existing participant instead of creating duplic
   assert.equal(allParticipantsWithoutTicket, true);
 });
 
+test('socket-level authorization should invalidate stale socket after ticket restore', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+
+  const firstJoin = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(firstJoin.success, true);
+  const staleIdentity = {
+    userId: firstJoin.data.userId,
+    sessionId: firstJoin.data.sessionId,
+  };
+
+  const secondJoin = manager.joinRoom('', 'socket-b', firstJoin.data.ticket);
+  assert.equal(secondJoin.success, true);
+  const activeIdentity = {
+    userId: secondJoin.data.userId,
+    sessionId: secondJoin.data.sessionId,
+  };
+
+  assert.equal(manager.isIdentityAuthorized(staleIdentity), true);
+  assert.equal(manager.isSocketIdentityAuthorized('socket-a', staleIdentity), false);
+  assert.equal(manager.isSocketIdentityAuthorized('socket-b', activeIdentity), true);
+});
+
+test('socket-level authorization should invalidate stale socket after reconnect', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+
+  const reconnectResult = manager.reconnect(hostIdentity, 'socket-host-2');
+  assert.equal(reconnectResult.success, true);
+
+  assert.equal(manager.isSocketIdentityAuthorized('socket-host', hostIdentity), false);
+  assert.equal(manager.isSocketIdentityAuthorized('socket-host-2', hostIdentity), true);
+});
+
 test('host ticket should restore host identity', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
@@ -373,10 +410,19 @@ test('uploadImageByTicket should be blocked during setup phase', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
 
-  const upload = await manager.uploadImageByTicket(join.data.ticket, IMAGE_MIME_TYPE, FIRST_IMAGE_BUFFER);
+  const upload = await manager.uploadImageByTicket(
+    join.data.ticket,
+    IMAGE_MIME_TYPE,
+    FIRST_IMAGE_BUFFER,
+    imageShowcasePage.id,
+  );
   assert.equal(upload.success, false);
   assert.equal(upload.error.code, 'BAD_REQUEST');
 
@@ -390,7 +436,9 @@ test('uploadImageByTicket should reject host ticket and allow participant ticket
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
   const hostIdentity = getHostIdentity(created);
-  await seedPages(manager, hostIdentity);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
 
@@ -401,14 +449,28 @@ test('uploadImageByTicket should reject host ticket and allow participant ticket
     created.data.ticket,
     IMAGE_MIME_TYPE,
     FIRST_IMAGE_BUFFER,
+    imageShowcasePage.id,
   );
   assert.equal(hostUpload.success, false);
   assert.equal(hostUpload.error.code, 'NOT_AUTHORIZED');
+
+  const uploadBeforeTargetPage = await manager.uploadImageByTicket(
+    join.data.ticket,
+    IMAGE_MIME_TYPE,
+    FIRST_IMAGE_BUFFER,
+    imageShowcasePage.id,
+  );
+  assert.equal(uploadBeforeTargetPage.success, false);
+  assert.equal(uploadBeforeTargetPage.error.code, 'BAD_REQUEST');
+
+  const switched = manager.nextStep(hostIdentity);
+  assert.equal(switched.success, true);
 
   const participantUpload = await manager.uploadImageByTicket(
     join.data.ticket,
     IMAGE_MIME_TYPE,
     FIRST_IMAGE_BUFFER,
+    imageShowcasePage.id,
   );
   assert.equal(participantUpload.success, true);
   assert.equal(participantUpload.data.url.startsWith('/uploads/'), true);
@@ -445,7 +507,7 @@ test('isIdentityAuthorized should respect session match and room lifecycle', asy
   assert.equal(manager.isIdentityAuthorized(hostIdentity), false);
 });
 
-test('cleanupExpired should report removed offline participants', async () => {
+test('cleanupExpired should remove disconnected participants after heartbeat grace period', async () => {
   const manager = createManager();
   const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
   assert.equal(created.success, true);
@@ -454,12 +516,58 @@ test('cleanupExpired should report removed offline participants', async () => {
   assert.equal(join.success, true);
   manager.onSocketDisconnected('socket-a');
 
-  const now = Date.now() + manager.getDisconnectGraceMs() + 1;
-  const cleanup = await manager.cleanupExpired(now);
+  const cleanup = await manager.cleanupExpired(Date.now() + manager.getDisconnectGraceMs() + 1);
 
   assert.equal(cleanup.closedRooms.length, 0);
   assert.equal(cleanup.removedParticipants.length, 1);
   assert.equal(cleanup.removedParticipants[0].userName, 'Alice');
+
+  const room = manager.getActiveRoom();
+  assert.ok(room);
+  assert.equal(room.participants.size, 1);
+});
+
+test('cleanupExpired should remove offline participants during live phase after grace period', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  await seedPages(manager, hostIdentity);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const ticket = join.data.ticket;
+  assert.ok(ticket);
+  manager.onSocketDisconnected('socket-a');
+
+  const cleanup = await manager.cleanupExpired(Date.now() + manager.getDisconnectGraceMs() + 1);
+
+  assert.equal(cleanup.closedRooms.length, 0);
+  assert.equal(cleanup.removedParticipants.length, 1);
+
+  const rejoin = manager.joinRoom('', 'socket-a-2', ticket);
+  assert.equal(rejoin.success, false);
+  assert.equal(rejoin.error.code, 'INVALID_TICKET');
+});
+
+test('cleanupExpired should close room when host is offline after grace period', async () => {
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  await seedPages(manager, hostIdentity);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+
+  manager.onSocketDisconnected('socket-host');
+  const cleanup = await manager.cleanupExpired(Date.now() + manager.getDisconnectGraceMs() + 1);
+
+  assert.equal(cleanup.closedRooms.length, 1);
+  assert.equal(cleanup.closedRooms[0].reason, 'HOST_TIMEOUT');
+  assert.equal(cleanup.removedParticipants.length, 1);
+  assert.equal(manager.getActiveRoom(), null);
 });
 
 test('participant can submit work and persist url/description fields', async () => {
@@ -579,6 +687,8 @@ test('submit work should reject non-image payload on image-mode page', async () 
   assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -626,10 +736,12 @@ test('submissions should be isolated by showcase page id', async () => {
     'URL 作品',
   );
   assert.equal(submitUrl.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
   const submitImage = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id),
     '图片作品',
   );
   assert.equal(submitImage.success, true);
@@ -655,6 +767,8 @@ test('image submission should be persisted as upload url and cleaned after room 
   assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -667,7 +781,7 @@ test('image submission should be persisted as upload url and cleaned after room 
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id),
     '图片作品',
   );
   assert.equal(submit.success, true);
@@ -699,6 +813,8 @@ test('replacing image submission should cleanup previous upload asset', async ()
   assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -710,7 +826,7 @@ test('replacing image submission should cleanup previous upload asset', async ()
   const firstSubmit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id),
     '第一版',
   );
   assert.equal(firstSubmit.success, true);
@@ -723,7 +839,7 @@ test('replacing image submission should cleanup previous upload asset', async ()
   const secondSubmit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket, SECOND_IMAGE_BUFFER),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id, SECOND_IMAGE_BUFFER),
     '第二版',
   );
   assert.equal(secondSubmit.success, true);
@@ -742,6 +858,39 @@ test('replacing image submission should cleanup previous upload asset', async ()
   safeCleanupUploadRoot();
 });
 
+test('revertUpload should cleanup unreferenced upload asset', async () => {
+  safeCleanupUploadRoot();
+
+  const manager = createManager();
+  const created = manager.createRoom('Host', 'Demo', '12345678', 'socket-host');
+  assert.equal(created.success, true);
+  const hostIdentity = getHostIdentity(created);
+  const pages = await seedPages(manager, hostIdentity);
+  const imageShowcasePage = pages.find((page) => page.kind === 'showcase' && page.submissionMode === 'image');
+  assert.ok(imageShowcasePage);
+  const started = manager.startLive(hostIdentity);
+  assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
+
+  const join = manager.joinRoom('Alice', 'socket-a');
+  assert.equal(join.success, true);
+  const participantIdentity = {
+    userId: join.data.userId,
+    sessionId: join.data.sessionId,
+  };
+
+  const uploadUrl = await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id);
+  const storedPath = path.resolve(__dirname, '..', uploadUrl.slice(1));
+  assert.equal(fs.existsSync(storedPath), true);
+
+  const reverted = await manager.revertUpload(participantIdentity, uploadUrl);
+  assert.equal(reverted.success, true);
+  assert.equal(fs.existsSync(storedPath), false);
+
+  safeCleanupUploadRoot();
+});
+
 test('removing showcase page should cleanup removed image submissions', async () => {
   safeCleanupUploadRoot();
 
@@ -754,6 +903,8 @@ test('removing showcase page should cleanup removed image submissions', async ()
   assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -765,7 +916,7 @@ test('removing showcase page should cleanup removed image submissions', async ()
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id),
     '图片作品',
   );
   assert.equal(submit.success, true);
@@ -796,6 +947,8 @@ test('participant leave should cleanup uploaded image assets', async () => {
   assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -807,7 +960,7 @@ test('participant leave should cleanup uploaded image assets', async () => {
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id),
     '图片作品',
   );
   assert.equal(submit.success, true);
@@ -835,6 +988,8 @@ test('cleanupExpired should cleanup uploaded image assets for removed offline pa
   assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -846,7 +1001,7 @@ test('cleanupExpired should cleanup uploaded image assets for removed offline pa
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id),
     '图片作品',
   );
   assert.equal(submit.success, true);
@@ -857,6 +1012,9 @@ test('cleanupExpired should cleanup uploaded image assets for removed offline pa
 
   const disconnected = manager.onSocketDisconnected('socket-a');
   assert.equal(disconnected, true);
+
+  const returned = manager.returnToSetup(hostIdentity);
+  assert.equal(returned.success, true);
 
   const cleanup = await manager.cleanupExpired(Date.now() + manager.getDisconnectGraceMs() + 1);
   assert.equal(cleanup.removedParticipants.length, 1);
@@ -877,6 +1035,8 @@ test('switching showcase mode from image to url should cleanup incompatible uplo
   assert.ok(imageShowcasePage);
   const started = manager.startLive(hostIdentity);
   assert.equal(started.success, true);
+  const switchedToImagePage = manager.nextStep(hostIdentity);
+  assert.equal(switchedToImagePage.success, true);
 
   const join = manager.joinRoom('Alice', 'socket-a');
   assert.equal(join.success, true);
@@ -888,7 +1048,7 @@ test('switching showcase mode from image to url should cleanup incompatible uplo
   const submit = await manager.submitWork(
     participantIdentity,
     imageShowcasePage.id,
-    await uploadImageAndGetUrl(manager, join.data.ticket),
+    await uploadImageAndGetUrl(manager, join.data.ticket, imageShowcasePage.id),
     '图片作品',
   );
   assert.equal(submit.success, true);

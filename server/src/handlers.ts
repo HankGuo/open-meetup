@@ -41,6 +41,10 @@ interface LayoutImportPayload {
   template: unknown;
 }
 
+interface UploadRevertPayload {
+  url: string;
+}
+
 export function registerHandlers(io: Server, roomManager: RoomManager) {
   io.use((socket, next) => {
     const auth = socket.handshake.auth as Partial<ReconnectPayload> | undefined;
@@ -145,7 +149,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
 
     socket.on('room:leave', async (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
       try {
-        const identity = getSocketIdentity(socket);
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
         if (!identity) {
           ack(callback, failure('Not in a room', 'NOT_AUTHENTICATED'));
           return;
@@ -178,7 +182,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
 
     socket.on('room:end', async (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
       try {
-        const identity = getSocketIdentity(socket);
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
         if (!identity) {
           ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
           return;
@@ -202,78 +206,98 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
     });
 
     socket.on('control:next', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
+      try {
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
+        if (!identity) {
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+          return;
+        }
 
-      const result = roomManager.nextStep(identity);
-      if (!result.success) {
-        ack(callback, result);
-        return;
-      }
+        const result = roomManager.nextStep(identity);
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
 
-      broadcastRoomState(io, roomManager);
-      ack(callback, { success: true, data: null });
+        broadcastRoomState(io, roomManager);
+        ack(callback, { success: true, data: null });
+      } catch (error) {
+        console.error('[Socket] control:next error:', error);
+        ack(callback, failure('Failed to switch to next page', 'INTERNAL_ERROR'));
+      }
     });
 
     socket.on('control:prev', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
+      try {
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
+        if (!identity) {
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+          return;
+        }
 
-      const result = roomManager.prevStep(identity);
-      if (!result.success) {
-        ack(callback, result);
-        return;
-      }
+        const result = roomManager.prevStep(identity);
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
 
-      broadcastRoomState(io, roomManager);
-      ack(callback, { success: true, data: null });
+        broadcastRoomState(io, roomManager);
+        ack(callback, { success: true, data: null });
+      } catch (error) {
+        console.error('[Socket] control:prev error:', error);
+        ack(callback, failure('Failed to switch to previous page', 'INTERNAL_ERROR'));
+      }
     });
 
     socket.on('control:start-live', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
+      try {
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
+        if (!identity) {
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+          return;
+        }
 
-      const result = roomManager.startLive(identity);
-      if (!result.success) {
-        ack(callback, result);
-        return;
-      }
+        const result = roomManager.startLive(identity);
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
 
-      broadcastRoomState(io, roomManager);
-      ack(callback, { success: true, data: null });
+        broadcastRoomState(io, roomManager);
+        ack(callback, { success: true, data: null });
+      } catch (error) {
+        console.error('[Socket] control:start-live error:', error);
+        ack(callback, failure('Failed to start live mode', 'INTERNAL_ERROR'));
+      }
     });
 
     socket.on('control:return-setup', (_payload: unknown, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
+      try {
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
+        if (!identity) {
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+          return;
+        }
 
-      const result = roomManager.returnToSetup(identity);
-      if (!result.success) {
-        ack(callback, result);
-        return;
-      }
+        const result = roomManager.returnToSetup(identity);
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
 
-      broadcastRoomState(io, roomManager);
-      ack(callback, { success: true, data: null });
+        broadcastRoomState(io, roomManager);
+        ack(callback, { success: true, data: null });
+      } catch (error) {
+        console.error('[Socket] control:return-setup error:', error);
+        ack(callback, failure('Failed to return to setup mode', 'INTERNAL_ERROR'));
+      }
     });
 
     socket.on(
       'pages:update',
       async (payload: PagesUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
         try {
-          const identity = getSocketIdentity(socket);
+          const identity = getAuthorizedSocketIdentity(socket, roomManager);
           if (!identity) {
             ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
             return;
@@ -295,33 +319,38 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
     );
 
     socket.on('page:update', (payload: PageUpdatePayload, callback?: AckFn<SocketResult<unknown>>) => {
-      const identity = getSocketIdentity(socket);
-      if (!identity) {
-        ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
-        return;
-      }
+      try {
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
+        if (!identity) {
+          ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+          return;
+        }
 
-      const pageId = payload?.pageId ?? '';
-      const content = payload.content
-        ? {
-            type: payload.content.type as 'canvas' | 'image' | 'url' | 'html' | 'markdown',
-            content: payload.content.content,
-          }
-        : null;
+        const pageId = payload?.pageId ?? '';
+        const content = payload.content
+          ? {
+              type: payload.content.type as 'canvas' | 'image' | 'url' | 'html' | 'markdown',
+              content: payload.content.content,
+            }
+          : null;
 
-      const result = roomManager.updatePageContent(identity, pageId, content);
-      if (!result.success) {
+        const result = roomManager.updatePageContent(identity, pageId, content);
+        if (!result.success) {
+          ack(callback, result);
+          return;
+        }
+
+        broadcastRoomState(io, roomManager);
         ack(callback, result);
-        return;
+      } catch (error) {
+        console.error('[Socket] page:update error:', error);
+        ack(callback, failure('Failed to update page content', 'INTERNAL_ERROR'));
       }
-
-      broadcastRoomState(io, roomManager);
-      ack(callback, result);
     });
 
     socket.on('work:submit', async (payload: WorkSubmitPayload, callback?: AckFn<SocketResult<unknown>>) => {
       try {
-        const identity = getSocketIdentity(socket);
+        const identity = getAuthorizedSocketIdentity(socket, roomManager);
         if (!identity) {
           ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
           return;
@@ -350,7 +379,7 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       'layout:import',
       async (payload: LayoutImportPayload, callback?: AckFn<SocketResult<unknown>>) => {
         try {
-          const identity = getSocketIdentity(socket);
+          const identity = getAuthorizedSocketIdentity(socket, roomManager);
           if (!identity) {
             ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
             return;
@@ -371,15 +400,28 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       },
     );
 
+    socket.on(
+      'upload:revert',
+      async (payload: UploadRevertPayload, callback?: AckFn<SocketResult<unknown>>) => {
+        try {
+          const identity = getAuthorizedSocketIdentity(socket, roomManager);
+          if (!identity) {
+            ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
+            return;
+          }
+
+          const result = await roomManager.revertUpload(identity, payload?.url ?? '');
+          ack(callback, result);
+        } catch (error) {
+          console.error('[Socket] upload:revert error:', error);
+          ack(callback, failure('Failed to revert upload', 'INTERNAL_ERROR'));
+        }
+      },
+    );
+
     socket.on('disconnect', (reason) => {
-      const disconnected = roomManager.onSocketDisconnected(socket.id);
+      roomManager.onSocketDisconnected(socket.id);
       console.log(`[Socket] Client disconnected: ${socket.id}, reason=${reason}`);
-
-      if (!disconnected) {
-        return;
-      }
-
-      broadcastRoomState(io, roomManager);
     });
   });
 }
@@ -412,6 +454,18 @@ function getSocketIdentity(socket: Socket): SocketIdentity | null {
     return null;
   }
   if (!identity.userId || !identity.sessionId) {
+    return null;
+  }
+  return identity;
+}
+
+function getAuthorizedSocketIdentity(socket: Socket, roomManager: RoomManager): SocketIdentity | null {
+  const identity = getSocketIdentity(socket);
+  if (!identity) {
+    return null;
+  }
+  if (!roomManager.isSocketIdentityAuthorized(socket.id, identity)) {
+    clearSocketIdentity(socket);
     return null;
   }
   return identity;
@@ -469,7 +523,7 @@ function pruneActiveRoomChannel(io: Server, roomManager: RoomManager) {
       continue;
     }
     const identity = getSocketIdentity(roomSocket);
-    if (!roomManager.isIdentityAuthorized(identity)) {
+    if (!roomManager.isSocketIdentityAuthorized(socketId, identity)) {
       clearSocketIdentity(roomSocket);
     }
   }

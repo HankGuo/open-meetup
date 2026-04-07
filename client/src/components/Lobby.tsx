@@ -13,23 +13,24 @@ export function Lobby() {
   const [password, setPassword] = useState('');
   const [participantLimit, setParticipantLimit] = useState(String(DEFAULT_PARTICIPANT_LIMIT));
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   async function handleCreateRoom() {
     if (!userName.trim()) {
-      alert('请输入您的姓名');
+      setFormError('请输入您的姓名');
       return;
     }
     if (!title.trim()) {
-      alert('请输入房间标题');
+      setFormError('请输入房间标题');
       return;
     }
     if (!password.trim()) {
-      alert('请输入授权口令');
+      setFormError('请输入授权口令');
       return;
     }
     const parsedLimit = Number(participantLimit);
     if (!Number.isFinite(parsedLimit)) {
-      alert(`请输入 ${MIN_PARTICIPANT_LIMIT}-${MAX_PARTICIPANT_LIMIT} 之间的人数上限`);
+      setFormError(`请输入 ${MIN_PARTICIPANT_LIMIT}-${MAX_PARTICIPANT_LIMIT} 之间的人数上限`);
       return;
     }
     const normalizedParticipantLimit = Math.floor(parsedLimit);
@@ -37,10 +38,11 @@ export function Lobby() {
       normalizedParticipantLimit < MIN_PARTICIPANT_LIMIT ||
       normalizedParticipantLimit > MAX_PARTICIPANT_LIMIT
     ) {
-      alert(`人数上限需在 ${MIN_PARTICIPANT_LIMIT}-${MAX_PARTICIPANT_LIMIT} 之间`);
+      setFormError(`人数上限需在 ${MIN_PARTICIPANT_LIMIT}-${MAX_PARTICIPANT_LIMIT} 之间`);
       return;
     }
     clearError();
+    setFormError(null);
     setLoading(true);
     const success = await createRoom(
       userName.trim(),
@@ -108,6 +110,11 @@ export function Lobby() {
                 {error}
               </div>
             )}
+            {formError && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-700">
+                {formError}
+              </div>
+            )}
 
             <div className="space-y-4">
               <label className="block">
@@ -122,7 +129,10 @@ export function Lobby() {
                   className="app-input app-input-light"
                   placeholder="请输入姓名"
                   value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
+                  onChange={(e) => {
+                    setUserName(e.target.value);
+                    setFormError(null);
+                  }}
                 />
               </label>
 
@@ -138,7 +148,10 @@ export function Lobby() {
                   className="app-input app-input-light"
                   placeholder="请输入房间标题"
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  onChange={(e) => {
+                    setTitle(e.target.value);
+                    setFormError(null);
+                  }}
                 />
               </label>
 
@@ -154,7 +167,10 @@ export function Lobby() {
                   className="app-input app-input-light mono"
                   placeholder="请输入授权口令"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setFormError(null);
+                  }}
                 />
               </label>
 
@@ -173,7 +189,10 @@ export function Lobby() {
                   className="app-input app-input-light mono"
                   placeholder={`默认 ${DEFAULT_PARTICIPANT_LIMIT}`}
                   value={participantLimit}
-                  onChange={(e) => setParticipantLimit(e.target.value)}
+                  onChange={(e) => {
+                    setParticipantLimit(e.target.value);
+                    setFormError(null);
+                  }}
                 />
                 <p className="mt-1 text-xs text-[var(--text-soft)]">
                   可设置范围：{MIN_PARTICIPANT_LIMIT}-{MAX_PARTICIPANT_LIMIT}

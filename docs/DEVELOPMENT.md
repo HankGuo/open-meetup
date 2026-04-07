@@ -82,6 +82,8 @@ npm run format
 - `PORT` server port (default: `3001`)
 - `HOST` bind host (default: `0.0.0.0`)
 - `MAX_PARTICIPANTS_PER_ROOM` default participant limit for new room (default: `50`)
+- `SOCKET_PING_INTERVAL_MS` Socket.IO heartbeat interval (default: `10000`)
+- `SOCKET_PING_TIMEOUT_MS` Socket.IO heartbeat timeout (default: `10000`)
 - `CORS_ALLOW_ORIGIN` CORS policy
 - `TRUST_PROXY` Express proxy trust config
 

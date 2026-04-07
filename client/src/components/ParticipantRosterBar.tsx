@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, CircleDot, Crown, Users, X } from 'lucide-react';
+import { ChevronDown, Crown, Users, X } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { User } from '../types';
 
@@ -53,7 +53,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
     (participant) => participant.userId !== hostId && participant.userId !== myUserId,
   );
   const hostAndMeAreSame = host && me && host.userId === me.userId;
-  const onlineCount = sortedParticipants.filter((participant) => participant.online).length;
   const menuMembers = sortedParticipants.slice(0, MENU_LIMIT);
   const hiddenMenuCount = Math.max(0, sortedParticipants.length - MENU_LIMIT);
 
@@ -111,10 +110,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                   })}
                 </div>
 
-                <span className="hidden shrink-0 text-[11px] text-[var(--text-soft)] md:inline">
-                  在线 {onlineCount}/{sortedParticipants.length}
-                </span>
-
                 <ChevronDown
                   className={`h-3.5 w-3.5 shrink-0 text-[var(--text-soft)] transition ${showMenu ? 'rotate-180' : ''}`}
                 />
@@ -157,10 +152,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                             <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--text-soft)]">
                               {isHost ? <Crown className="h-3 w-3 text-amber-500" /> : null}
                               <span>{isHost ? '主持人' : isMe ? '我' : '参与者'}</span>
-                              <CircleDot
-                                className={`h-2.5 w-2.5 ${participant.online ? 'text-emerald-500' : 'text-[var(--text-soft)]'}`}
-                              />
-                              <span>{participant.online ? '在线' : '离线'}</span>
                             </div>
                           </div>
                         </div>
@@ -238,15 +229,6 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                             我
                           </span>
                         ) : null}
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                            participant.online
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-[var(--panel-soft)] text-[var(--text-soft)]'
-                          }`}
-                        >
-                          {participant.online ? '在线' : '离线'}
-                        </span>
                       </div>
                     </div>
                   </div>

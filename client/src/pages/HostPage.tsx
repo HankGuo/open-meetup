@@ -12,6 +12,8 @@ export function HostPage() {
   const [ticketConfirmed, setTicketConfirmed] = useState(true);
   const [copied, setCopied] = useState(false);
   const [copiedShareAddress, setCopiedShareAddress] = useState(false);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [endingRoom, setEndingRoom] = useState(false);
   const shareAddress = typeof window !== 'undefined' ? window.location.origin : '';
 
   useEffect(() => {
@@ -30,11 +32,22 @@ export function HostPage() {
     }
   }, [myTicket]);
 
-  async function handleEndRoom() {
-    if (!confirm('确定要结束房间吗？结束后所有用户都将被退出。')) {
+  function handleRequestEndRoom() {
+    setShowEndConfirm(true);
+  }
+
+  async function handleConfirmEndRoom() {
+    if (endingRoom) {
       return;
     }
-    await endRoom();
+    setEndingRoom(true);
+    const success = await endRoom();
+    if (!success) {
+      setEndingRoom(false);
+      return;
+    }
+    setShowEndConfirm(false);
+    setEndingRoom(false);
   }
 
   async function handleReturnToSetup() {
@@ -121,7 +134,7 @@ export function HostPage() {
       </button>
       <button
         type="button"
-        onClick={handleEndRoom}
+        onClick={handleRequestEndRoom}
         aria-label="结束房间"
         title="结束房间"
         className="stage-action-btn stage-action-btn--danger"
@@ -144,7 +157,7 @@ export function HostPage() {
           copiedTicket={copied}
           onCopyTicket={() => void handleCopyTicket()}
           onLeaveRoom={() => void leaveRoom()}
-          onEndRoom={() => void handleEndRoom()}
+          onEndRoom={handleRequestEndRoom}
         />
       ) : (
         <MeetingStage topActions={liveTopActions} />
@@ -184,6 +197,41 @@ export function HostPage() {
                   我已牢记，继续主持
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showEndConfirm ? (
+        <div className="dialog-overlay fixed inset-0 z-[72] flex items-center justify-center p-4">
+          <div
+            className="dialog-panel w-full max-w-md overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-[var(--border)] px-5 py-4">
+              <p className="text-xs font-semibold tracking-[0.08em] text-rose-600">结束确认</p>
+              <h3 className="mt-1 text-lg font-semibold text-[var(--text)]">确定结束房间？</h3>
+              <p className="mt-2 text-sm text-[var(--text-soft)]">
+                结束后所有参与者会立即退出，房间状态与本地存储将一并清理。
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setShowEndConfirm(false)}
+                className="btn-base btn-secondary h-9 rounded-md px-3 text-sm"
+                disabled={endingRoom}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmEndRoom()}
+                className="btn-base btn-danger-soft h-9 rounded-md px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={endingRoom}
+              >
+                {endingRoom ? '结束中...' : '确认结束'}
+              </button>
             </div>
           </div>
         </div>

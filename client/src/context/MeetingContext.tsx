@@ -455,6 +455,22 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     [handleSocketFailure, safeEmit],
   );
 
+  const revertUploadedImage = useCallback(
+    async (url: string): Promise<void> => {
+      const normalizedUrl = typeof url === 'string' ? url.trim() : '';
+      if (!normalizedUrl) {
+        return;
+      }
+      const response = (await safeEmit('upload:revert', {
+        url: normalizedUrl,
+      })) as SocketResponse<{ reverted: boolean }> | null;
+      if (!response || !response.success) {
+        return;
+      }
+    },
+    [safeEmit],
+  );
+
   useEffect(() => {
     const onConnect = () => {
       setIsConnected(true);
@@ -530,6 +546,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     updatePages,
     importLayoutTemplate,
     submitMyWork,
+    revertUploadedImage,
     clearError,
   };
 
@@ -553,9 +570,6 @@ function mapRoomClosedReason(reason: string): string {
   }
   if (reason === 'HOST_TIMEOUT') {
     return '主持人离线超时，房间已关闭';
-  }
-  if (reason === 'ROOM_EXPIRED') {
-    return '房间已过期，请重新创建';
   }
   return '房间已关闭';
 }

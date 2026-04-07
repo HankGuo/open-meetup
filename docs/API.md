@@ -12,7 +12,9 @@ Response:
 {
   "status": "ok",
   "activeRooms": 1,
-  "disconnectGraceMs": 120000
+  "disconnectGraceMs": 300000,
+  "socketPingIntervalMs": 10000,
+  "socketPingTimeoutMs": 10000
 }
 ```
 
@@ -69,6 +71,7 @@ Invalid / room unavailable:
 Raw image upload endpoint.
 
 - Header: `x-open-meetup-ticket: <ticket>`
+- Header: `x-open-meetup-page-id: <pageId>`
 - Header: `content-type: image/*`
 - Body: raw binary image bytes
 
@@ -126,6 +129,7 @@ Server push:
 ### Participant interaction
 
 - `work:submit` payload: `{ pageId, url, description }`
+- `upload:revert` payload: `{ url }`
 
 ---
 

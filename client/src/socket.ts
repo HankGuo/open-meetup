@@ -3,7 +3,7 @@ import { SessionCredentials } from './types';
 import { getServerBaseUrl } from './serverUrl';
 
 const SERVER_URL = getServerBaseUrl();
-const ACK_TIMEOUT_MS = Number(import.meta.env.VITE_SOCKET_ACK_TIMEOUT_MS || 6000);
+const ACK_TIMEOUT_MS = Number(import.meta.env.VITE_SOCKET_ACK_TIMEOUT_MS || 15000);
 
 let socket: Socket | null = null;
 

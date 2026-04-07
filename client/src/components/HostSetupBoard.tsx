@@ -65,6 +65,11 @@ export function HostSetupBoard({
   const [newShowcaseMode, setNewShowcaseMode] = useState<PageSubmissionMode>('url');
   const [newShowcaseRankingEnabled, setNewShowcaseRankingEnabled] = useState(true);
   const [newShowcaseTitle, setNewShowcaseTitle] = useState('');
+  const [templateFeedback, setTemplateFeedback] = useState<{
+    type: 'error' | 'success';
+    message: string;
+  } | null>(null);
+  const [pendingTemplateImport, setPendingTemplateImport] = useState<LayoutTemplate | null>(null);
 
   useEffect(() => {
     setDraftPages(pages);
@@ -224,8 +229,9 @@ export function HostSetupBoard({
       link.click();
       link.remove();
       URL.revokeObjectURL(objectUrl);
+      setTemplateFeedback({ type: 'success', message: '编排模板已导出。' });
     } catch {
-      alert('导出编排模板失败，请重试。');
+      setTemplateFeedback({ type: 'error', message: '导出编排模板失败，请重试。' });
     }
   }
 
@@ -247,20 +253,32 @@ export function HostSetupBoard({
     try {
       parsed = JSON.parse(await file.text());
     } catch {
-      alert('模板文件不是有效的 JSON。');
+      setTemplateFeedback({ type: 'error', message: '模板文件不是有效的 JSON。' });
       return;
     }
+    setTemplateFeedback(null);
+    setPendingTemplateImport(parsed as LayoutTemplate);
+  }
 
-    if (!confirm('导入模板会覆盖当前编排（页面流程与页面内容），是否继续？')) {
+  async function handleConfirmImportTemplate() {
+    if (!pendingTemplateImport || importingTemplate) {
       return;
     }
 
     setImportingTemplate(true);
-    const success = await importLayoutTemplate(parsed as LayoutTemplate);
+    const success = await importLayoutTemplate(pendingTemplateImport);
     setImportingTemplate(false);
     if (!success) {
-      alert('导入失败：请确认模板格式正确，并且当前处于编排阶段。');
+      setPendingTemplateImport(null);
+      setTemplateFeedback({
+        type: 'error',
+        message: '导入失败：请确认模板格式正确，并且当前处于编排阶段。',
+      });
+      return;
     }
+
+    setPendingTemplateImport(null);
+    setTemplateFeedback({ type: 'success', message: '编排模板导入成功。' });
   }
 
   const pageCountLabel = saving ? '同步中...' : `已编排 ${draftPages.length} 页`;
@@ -340,6 +358,18 @@ export function HostSetupBoard({
                   </button>
                 </div>
               </div>
+
+              {templateFeedback ? (
+                <div
+                  className={`mx-4 mt-3 rounded-xl border px-3 py-2 text-sm md:mx-5 ${
+                    templateFeedback.type === 'error'
+                      ? 'border-rose-200 bg-rose-50 text-rose-700'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  }`}
+                >
+                  {templateFeedback.message}
+                </div>
+              ) : null}
 
               <div className="min-h-0 flex-1 overflow-auto p-3 md:p-4">
                 {draftPages.length === 0 ? (
@@ -590,6 +620,44 @@ export function HostSetupBoard({
           }}
         />
       )}
+
+      {pendingTemplateImport ? (
+        <div
+          className="dialog-overlay fixed inset-0 z-[71] flex items-center justify-center p-4"
+          onClick={() => setPendingTemplateImport(null)}
+        >
+          <div
+            className="dialog-panel w-full max-w-md overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-[var(--border)] px-5 py-4">
+              <p className="text-xs font-semibold tracking-[0.08em] text-[var(--accent)]">导入确认</p>
+              <h3 className="mt-1 text-lg font-semibold text-[var(--text)]">确定覆盖当前编排？</h3>
+              <p className="mt-2 text-sm text-[var(--text-soft)]">
+                导入模板会覆盖当前页面流程与页面内容，建议先导出备份。
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setPendingTemplateImport(null)}
+                className="btn-base btn-secondary h-9 rounded-md px-3 text-sm"
+                disabled={importingTemplate}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmImportTemplate()}
+                className="btn-base btn-primary h-9 rounded-md px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={importingTemplate}
+              >
+                {importingTemplate ? '导入中...' : '确认导入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showCreateShowcaseDialog ? (
         <div

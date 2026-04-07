@@ -1,158 +1,187 @@
 # Open Meetup
 
-[简体中文文档](./README.zh-CN.md)
+Open Meetup 是一个面向线下活动（工作坊、培训、分享会）的 **LAN-first 单房间实时互动系统**。
 
-Open Meetup is a LAN-first, single-room interactive presentation system designed for in-person workshops, trainings, and meetup sessions.
+它把“主持人讲 + 参与者看”的静态流程，升级为“主持人编排 + 参与者实时提交 + 全员同步展示”的互动流程，同时保持部署简单、可控、低运维成本。
 
-It replaces static slide flow with real-time interaction while keeping deployment and operations simple.
+## 目录
 
-## Product Positioning
+- [核心定位](#核心定位)
+- [功能总览](#功能总览)
+- [系统约束与边界](#系统约束与边界)
+- [架构与运行模型](#架构与运行模型)
+- [快速开始](#快速开始)
+- [环境变量](#环境变量)
+- [常用命令](#常用命令)
+- [接口与协议](#接口与协议)
+- [压测脚本](#压测脚本)
+- [发布前检查清单](#发布前检查清单)
+- [故障排查](#故障排查)
+- [项目结构](#项目结构)
+- [安全说明](#安全说明)
+- [许可证](#许可证)
 
-- One active room at a time
-- One host controls pacing and orchestration
-- Participants join by name or ticket
-- Setup phase and live phase are clearly separated
-- LAN-friendly startup with minimal operator cognitive load
-- No Docker required for the default workflow
+## 核心定位
 
-## Core Capabilities
+- 同一时刻只维护一个活动房间（single active room）
+- 主持人统一控制流程与节奏
+- 参与者通过昵称首次加入，后续可通过 Ticket 恢复身份
+- 明确拆分 `setup`（编排）与 `live`（播放）两个阶段
+- 局域网优先，适配线下同场景协作
+- 默认启动流程不依赖 Docker
 
-- `canvas` page:
-  - Host-edited free canvas (Excalidraw-based)
-  - Displayed read-only during live playback
-- `showcase` page:
-  - Participant submissions (`url` or `image`)
-  - Optional ranking crowns (gold/silver/bronze for top 3)
-  - Latest submission wins for each participant
-- Ticket-based identity continuity:
-  - Host and participants are both bound to tickets
-  - Ticket validity is always checked on the backend
-  - First create/join shows mandatory ticket reminder dialog
-- Layout template workflow:
-  - Export orchestration template (`version: 1`)
-  - Re-import template during setup phase
-- Image transport without socket base64 payload:
-  - Binary upload via HTTP
-  - Submission payload keeps URL + description only
+## 功能总览
 
-## Runtime Model
+### 1) 页面类型
 
-- Room state: in-memory (`MemoryStore`)
-- Uploaded files: local filesystem (`server/uploads`)
-- On room end/close:
-  - managed uploads are cleaned
-  - client local storage keys with `open-meetup:` prefix are cleared
-- On server restart:
-  - in-memory room state is reset
+- `canvas`（自由画布）
+  - 主持人使用 Excalidraw 编辑
+  - 播放态只读展示
+- `showcase`（互动页）
+  - 参与者提交 `url` 或 `image`
+  - 支持可选“排名皇冠”展示（前 3 名）
+  - 同一参与者同一页面可反复提交，后一次覆盖前一次
 
-## Architecture Overview
+### 2) 身份与会话
 
-- Frontend: React + Vite + TypeScript
-- Backend: Node.js + Express + Socket.IO + TypeScript
-- Storage:
-  - runtime room state in memory
-  - uploaded assets in local directory
+- 主持人与参与者均绑定 Ticket
+- Ticket 有效性统一由后端判定
+- 断线重连基于 `(userId, sessionId)` 与 socket 侧身份映射校验
+- 首次加入/建房后前端会提示用户保存 Ticket
 
-## Requirements
+### 3) 编排模板
+
+- 支持导出模板（`version: 1`）
+- 支持在 `setup` 阶段导入模板
+- 模板可包含页面定义与页面内容快照
+
+### 4) 图片上传链路
+
+- 图片通过 HTTP 二进制上传（`POST /api/uploads/image`）
+- Socket 侧仅传作品 URL + 描述，避免 base64 大包推送
+
+## 系统约束与边界
+
+- 仅支持单房间运行，不支持并发多房间
+- 房间状态存储在内存（服务重启后房间状态丢失）
+- 上传文件落地在本地文件系统（`server/uploads`）
+- 适用于中小规模线下活动（不是公网大规模 SaaS 场景）
+
+## 架构与运行模型
+
+### 技术栈
+
+- 前端：React + Vite + TypeScript
+- 后端：Node.js + Express + Socket.IO + TypeScript
+- 测试：Node Test Runner + Vitest
+
+### 状态模型
+
+- 房间状态：`MemoryStore`
+- 核心编排：`RoomManager`
+- 输入校验：`roomManager.validation.ts`
+- 状态快照：`roomManager.state.ts`
+- 上传清理：`roomManager.uploads.ts`
+
+### 生命周期
+
+1. 主持人创建房间（`setup`）
+2. 主持人编排页面（增删改、排序、模板导入导出）
+3. 主持人开始播放（进入 `live`）
+4. 参与者按当前互动页提交内容
+5. 主持人翻页/回编排/结束房间
+
+## 快速开始
+
+### 环境要求
 
 - Node.js 20+
 - npm 10+
-- Host and participant devices in the same LAN for LAN scenario
 
-## Quick Start
-
-1. Install dependencies:
+### 安装依赖
 
 ```bash
 npm run install:all
 ```
 
-2. Start:
+### 启动
 
 ```bash
 npm start
 ```
 
-3. Share the printed LAN URL with participants.
+启动后会输出局域网访问地址（例如 `http://192.168.x.x:8080`），并尝试自动复制到剪贴板。
 
-The startup script prints a URL like:
-
-`http://192.168.x.x:8080`
-
-By default, it also tries to copy that URL to clipboard.
-
-## Stop and Logs
+### 停止与日志
 
 ```bash
 npm stop
 npm run logs
 ```
 
-## Startup Options
-
-Use options after `--`:
+### 可选启动参数
 
 ```bash
-npm start -- --host-password <password> --port <client_port>
+npm start -- --host-password <口令> --port <前端端口>
 ```
 
-- `--host-password`: host authorization password
-- `--port`: frontend access port (LAN share port)
-
-Example:
+示例：
 
 ```bash
 npm start -- --host-password 12345678 --port 8080
 ```
 
-## Configuration
+## 环境变量
 
-### Commonly used
+### 常用
 
-| Key             | Default    | Description                              |
-| --------------- | ---------- | ---------------------------------------- |
-| `HOST_PASSWORD` | `12345678` | Host password                            |
-| `LAN_PORT`      | `8080`     | Frontend LAN access port for `npm start` |
+| 变量名          | 默认值     | 说明                   |
+| --------------- | ---------- | ---------------------- |
+| `HOST_PASSWORD` | `12345678` | 主持人口令             |
+| `LAN_PORT`      | `8080`     | CLI 启动时前端访问端口 |
 
-### Backend/runtime related
+### 后端运行时
 
-| Key                                    | Default                       | Description                                       |
-| -------------------------------------- | ----------------------------- | ------------------------------------------------- |
-| `HOST`                                 | `0.0.0.0`                     | Backend bind host                                 |
-| `PORT`                                 | `3001`                        | Backend HTTP/Socket.IO port                       |
-| `MAX_PARTICIPANTS_PER_ROOM`            | `50`                          | Default participant limit used when creating room |
-| `ROOM_CLEANUP_INTERVAL_MS`             | `30000`                       | Cleanup interval for offline timeout checks       |
-| `TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS` | `60`                          | Max ticket-check requests per window              |
-| `CORS_ALLOW_ORIGIN`                    | `*` (non-production fallback) | Allowed CORS origins                              |
-| `TRUST_PROXY`                          | `false`                       | Express trust proxy setting                       |
+| 变量名                                 | 默认值         | 说明                               |
+| -------------------------------------- | -------------- | ---------------------------------- |
+| `HOST`                                 | `0.0.0.0`      | 后端绑定地址                       |
+| `PORT`                                 | `3001`         | 后端端口                           |
+| `MAX_PARTICIPANTS_PER_ROOM`            | `50`           | 新建房间默认人数上限（不含主持人） |
+| `DISCONNECT_GRACE_MS`                  | `300000`       | 断线保留窗口（ms）                 |
+| `ROOM_CLEANUP_INTERVAL_MS`             | `30000`        | 断线清理轮询间隔（ms）             |
+| `SOCKET_PING_INTERVAL_MS`              | `10000`        | Socket.IO ping 周期（ms）          |
+| `SOCKET_PING_TIMEOUT_MS`               | `10000`        | Socket.IO ping 超时（ms）          |
+| `TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS` | `60`           | Ticket 校验接口限流阈值（每窗口）  |
+| `IMAGE_UPLOAD_RATE_LIMIT_MAX_REQUESTS` | `30`           | 图片上传接口限流阈值（每窗口）     |
+| `CORS_ALLOW_ORIGIN`                    | 非生产默认 `*` | 允许的 CORS 来源                   |
+| `TRUST_PROXY`                          | `false`        | Express trust proxy 设置           |
 
-Notes:
+说明：
 
-- Room participant limit can be customized by host in room creation form.
-- Hard bounds are `1 ~ 500`.
+- 人数上限硬边界是 `1 ~ 500`
+- 生产环境必须显式配置安全项（尤其 `HOST_PASSWORD`、`CORS_ALLOW_ORIGIN`）
 
-## Scripts
+## 常用命令
 
-| Command                 | Description                                     |
-| ----------------------- | ----------------------------------------------- |
-| `npm start`             | Start backend and frontend in LAN-friendly mode |
-| `npm stop`              | Stop processes started by `npm start`           |
-| `npm run logs`          | Tail backend/frontend logs                      |
-| `npm run build`         | Build server and client                         |
-| `npm test`              | Build + server tests + client tests             |
-| `npm run lint`          | ESLint checks                                   |
-| `npm run format`        | Prettier format check                           |
-| `npm run sim:bulk-join` | Bulk join simulation (independent testing tool) |
+| 命令                    | 说明                                 |
+| ----------------------- | ------------------------------------ |
+| `npm start`             | 启动后端和前端（局域网友好模式）     |
+| `npm stop`              | 停止 `npm start` 启动的进程          |
+| `npm run logs`          | 持续查看 server/client 日志          |
+| `npm run build`         | 构建 server/client                   |
+| `npm test`              | 执行构建 + server 测试 + client 测试 |
+| `npm run lint`          | ESLint 检查                          |
+| `npm run format`        | Prettier 格式检查                    |
+| `npm run sim:bulk-join` | 批量加入模拟（压测辅助）             |
 
-## API and Protocol
+## 接口与协议
 
-High-level references:
+详细文档：
 
-- HTTP API: [docs/API.md](./docs/API.md)
-- Socket events: [docs/API.md](./docs/API.md)
-- Development guide: [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)
+- [docs/API.md](./docs/API.md)
+- [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)
 
-Main HTTP endpoints:
+核心 HTTP 接口：
 
 - `GET /health`
 - `GET /api/room/current`
@@ -160,14 +189,33 @@ Main HTTP endpoints:
 - `POST /api/uploads/image`
 - `GET /uploads/:roomId/:fileName`
 
-## Security Notes
+核心 Socket 事件：
 
-- Ticket validation is backend-authoritative.
-- Upload path segments are sanitized at HTTP and storage layers.
-- Storage layer enforces resolved-path boundary checks to prevent traversal.
-- Empty/invalid image payloads are rejected.
+- 房间生命周期：`room:create` / `room:join` / `room:reconnect` / `room:leave` / `room:end`
+- 主持控制：`control:start-live` / `control:return-setup` / `control:next` / `control:prev`
+- 编排相关：`pages:update` / `page:update` / `layout:import`
+- 互动提交：`work:submit` / `upload:revert`
+- 服务端推送：`state:sync` / `room:closed`
 
-## Testing and Quality Gates
+## 压测脚本
+
+工程内置批量加入模拟器：
+
+```bash
+npm run sim:bulk-join -- --count 40 --server http://localhost:3001
+```
+
+常见参数：
+
+- `--count <n>`：模拟人数
+- `--spread-ms <ms>`：错峰启动间隔
+- `--timeout-ms <ms>`：单连接超时
+- `--auto-create-room`：无房间时自动建房
+- `--end-room-on-exit`：结束时自动关闭模拟房间
+
+## 发布前检查清单
+
+建议每次发版执行：
 
 ```bash
 npm run lint
@@ -175,30 +223,60 @@ npm run format
 npm test
 ```
 
-Current test coverage includes:
+并额外做一次人工验收：
 
-- Server unit/integration tests (`node --test`)
-- Frontend unit tests (`vitest`)
+1. 主持人建房 -> 编排 -> 开始播放 -> 翻页 -> 回编排 -> 结束
+2. 参与者首次加入、Ticket 重入、断网重连
+3. `showcase` 的 URL 提交与图片提交都可正常展示
+4. 结束房间后参与端收到 `room:closed` 并回到入口页
+5. 多端同时在线时成员列表与当前页同步正常
 
-## Project Structure
+## 故障排查
+
+### 启动失败
+
+- 先看 `npm run logs`
+- 检查端口占用：前端端口（默认 8080）和后端端口（默认 3001）
+- 检查 `HOST_PASSWORD` 是否为空（生产环境会阻止启动）
+
+### 参与者无法加入
+
+- 确认主持端与参与端在同一局域网
+- 确认访问地址为主持机 LAN IP（非 `localhost`）
+- 用 `GET /api/room/current` 检查是否存在活动房间
+
+### Ticket 不可用
+
+- 用 `GET /api/room/ticket-check?ticket=...` 验证
+- 房间关闭、服务重启或超时清理后，旧 Ticket 会失效
+
+### 图片无法上传
+
+- 检查请求头 `X-Open-Meetup-Ticket`
+- 检查请求头 `X-Open-Meetup-Page-Id`
+- 检查 `content-type` 是否为 `image/*`
+- 检查图片大小（前端限制 1.5MB，后端限制 2MB）
+
+## 项目结构
 
 ```text
 open-meetup/
-├── client/                         # React frontend
-├── server/                         # Express + Socket.IO backend
-├── scripts/                        # startup/stop/log and simulator scripts
-├── docs/                           # developer and API docs
+├── client/                         # React 前端
+├── server/                         # Express + Socket.IO 后端
+├── scripts/                        # 启停/日志/模拟脚本
+├── docs/                           # API 与开发文档
 ├── .env.example
 ├── README.md
 └── README.zh-CN.md
 ```
 
-## Limitations (Current Design)
+## 安全说明
 
-- Single active room only
-- Runtime state is not persisted across backend restarts
-- Designed primarily for LAN and small-to-medium in-person sessions
+- Ticket 与 session 均由后端判定，前端不信任本地身份状态
+- 上传路径在 HTTP 与存储层双重白名单校验
+- 存储层做路径边界检查，防止路径遍历
+- 非法图片类型与空 payload 会被拒绝
 
-## License
+## 许可证
 
-MIT License. See [LICENSE](./LICENSE).
+MIT，详见 [LICENSE](./LICENSE)。

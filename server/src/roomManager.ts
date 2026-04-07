@@ -13,7 +13,12 @@ import {
   SocketIdentity,
   SocketResult,
 } from './types';
-import { HOST_PASSWORD, ROOM_PARTICIPANT_LIMIT_MAX, ROOM_PARTICIPANT_LIMIT_MIN } from './config';
+import {
+  DISCONNECT_GRACE_MS,
+  HOST_PASSWORD,
+  ROOM_PARTICIPANT_LIMIT_MAX,
+  ROOM_PARTICIPANT_LIMIT_MIN,
+} from './config';
 import { MemoryStore, RoomStore } from './store';
 import { createDefaultMeetingPages, MAX_MEETING_PAGES } from './meetingConfig';
 import { AssetStorage, createAssetStorage } from './assetStorage';
@@ -39,7 +44,6 @@ import {
   removeRoomUploads,
 } from './roomManager.uploads';
 
-const DISCONNECT_GRACE_MS = 120_000;
 const PARTICIPANT_TICKET_PREFIX = 'TKT-';
 const PARTICIPANT_TICKET_RANDOM_LENGTH = 12;
 const HOST_TICKET_RANDOM_LENGTH = 12;
@@ -316,15 +320,6 @@ export class RoomManager {
         ok: true,
         roomClosed: true,
         reason: 'HOST_LEFT',
-      };
-    }
-
-    if (room.participants.size === 0) {
-      await this.closeRoom();
-      return {
-        ok: true,
-        roomClosed: true,
-        reason: 'ROOM_EXPIRED',
       };
     }
 
@@ -627,6 +622,7 @@ export class RoomManager {
     ticketInput: string,
     mimeTypeInput: string,
     bufferInput: Buffer,
+    pageIdInput: string,
   ): Promise<SocketResult<{ url: string }>> {
     const room = this.getActiveRoom();
     if (!room) {
@@ -652,6 +648,20 @@ export class RoomManager {
       return this.fail('Only participant can upload image', 'NOT_AUTHORIZED');
     }
 
+    const pageId = sanitizePageId(pageIdInput);
+    if (!pageId) {
+      return this.fail('页面 ID 无效', 'BAD_REQUEST');
+    }
+
+    const targetPage = room.pages.find((page) => page.id === pageId);
+    if (!targetPage || targetPage.kind !== 'showcase' || (targetPage.submissionMode ?? 'url') !== 'image') {
+      return this.fail('当前页面未开启图片提交', 'BAD_REQUEST');
+    }
+    const currentPageId = room.pages[room.currentStep]?.id ?? '';
+    if (currentPageId !== targetPage.id) {
+      return this.fail('仅当前互动页允许上传图片', 'BAD_REQUEST');
+    }
+
     const uploadUrl = await persistImageUpload(this.assetStorage, room, mimeTypeInput, bufferInput);
     if (!uploadUrl) {
       return this.fail('请上传有效图片后再提交', 'BAD_REQUEST');
@@ -660,6 +670,36 @@ export class RoomManager {
     return {
       success: true,
       data: { url: uploadUrl },
+    };
+  }
+
+  async revertUpload(
+    identity: SocketIdentity,
+    uploadUrlInput: string,
+  ): Promise<SocketResult<{ reverted: boolean }>> {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'participant') {
+      return this.fail('Only participant can revert upload', 'NOT_AUTHORIZED');
+    }
+    if (auth.room.status !== 'active') {
+      return this.fail('Room is not active', 'ROOM_NOT_ACTIVE');
+    }
+
+    const uploadUrl = normalizeManagedUploadUrlForRoom(uploadUrlInput, auth.room.id);
+    if (!uploadUrl) {
+      return this.fail('上传地址无效', 'BAD_REQUEST');
+    }
+
+    await cleanupUploadUrls(this.assetStorage, auth.room, [uploadUrl]);
+    auth.room.updatedAt = Date.now();
+    this.store.saveRoom(auth.room);
+
+    return {
+      success: true,
+      data: { reverted: true },
     };
   }
 
@@ -731,9 +771,6 @@ export class RoomManager {
     if (!hostAlive) {
       closedRooms.push({ reason: 'HOST_TIMEOUT' });
       await this.closeRoom();
-    } else if (room.participants.size === 0) {
-      closedRooms.push({ reason: 'ROOM_EXPIRED' });
-      await this.closeRoom();
     }
 
     return { closedRooms, removedParticipants };
@@ -782,6 +819,10 @@ export class RoomManager {
     return this.authorize(identity) != null;
   }
 
+  isSocketIdentityAuthorized(socketId: string, identity: SocketIdentity | null | undefined): boolean {
+    return this.authorizeBySocket(socketId, identity) != null;
+  }
+
   private authorize(identity: SocketIdentity | null | undefined): AuthContext | null {
     if (!identity) {
       return null;
@@ -798,6 +839,32 @@ export class RoomManager {
       return null;
     }
     return { room, participant };
+  }
+
+  private authorizeBySocket(
+    socketId: string,
+    identity: SocketIdentity | null | undefined,
+  ): AuthContext | null {
+    if (!socketId || !identity) {
+      return null;
+    }
+
+    const mappedIdentity = this.socketToIdentity.get(socketId);
+    if (!mappedIdentity) {
+      return null;
+    }
+    if (mappedIdentity.userId !== identity.userId || mappedIdentity.sessionId !== identity.sessionId) {
+      return null;
+    }
+
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return null;
+    }
+    if (auth.participant.socketId !== socketId || !auth.participant.online) {
+      return null;
+    }
+    return auth;
   }
 
   private async closeRoom(): Promise<void> {

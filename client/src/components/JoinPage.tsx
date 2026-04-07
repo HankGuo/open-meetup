@@ -17,6 +17,7 @@ export function JoinPage() {
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [autoJoinTicket, setAutoJoinTicket] = useState('');
 
   useEffect(() => {
@@ -60,6 +61,7 @@ export function JoinPage() {
 
       clearError();
       setTicketError(null);
+      setFormError(null);
       setVerifying(true);
       const verifyResult = await verifyTicket(normalizedTicket);
       setVerifying(false);
@@ -107,9 +109,10 @@ export function JoinPage() {
 
     clearError();
     setTicketError(null);
+    setFormError(null);
 
     if (!userName.trim()) {
-      alert('请输入您的昵称');
+      setFormError('请输入您的昵称');
       return;
     }
     setLoading(true);
@@ -158,7 +161,10 @@ export function JoinPage() {
                 className={`btn-base segmented-item text-sm ${
                   mode === 'form' ? 'segmented-item--active' : ''
                 }`}
-                onClick={() => setMode('form')}
+                onClick={() => {
+                  setMode('form');
+                  setFormError(null);
+                }}
               >
                 <User className="h-4 w-4" />
                 首次加入
@@ -168,7 +174,10 @@ export function JoinPage() {
                 className={`btn-base segmented-item text-sm ${
                   mode === 'ticket' ? 'segmented-item--active' : ''
                 }`}
-                onClick={() => setMode('ticket')}
+                onClick={() => {
+                  setMode('ticket');
+                  setFormError(null);
+                }}
               >
                 <Ticket className="h-4 w-4" />有 Ticket
               </button>
@@ -177,6 +186,11 @@ export function JoinPage() {
             {error && (
               <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {error}
+              </div>
+            )}
+            {formError && (
+              <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                {formError}
               </div>
             )}
 
@@ -214,7 +228,10 @@ export function JoinPage() {
                     className="app-input app-input-light"
                     placeholder="请输入您的昵称"
                     value={userName}
-                    onChange={(e) => setUserName(e.target.value)}
+                    onChange={(e) => {
+                      setUserName(e.target.value);
+                      setFormError(null);
+                    }}
                   />
                 </label>
               </div>

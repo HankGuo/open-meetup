@@ -121,7 +121,10 @@ npm start -- --host-password 12345678 --port 8080
 | `HOST`                                 | `0.0.0.0`      | 后端绑定地址                    |
 | `PORT`                                 | `3001`         | 后端 HTTP/Socket.IO 端口        |
 | `MAX_PARTICIPANTS_PER_ROOM`            | `50`           | 创建房间时的默认人数上限        |
-| `ROOM_CLEANUP_INTERVAL_MS`             | `30000`        | 离线清理任务轮询间隔            |
+| `DISCONNECT_GRACE_MS`                  | `300000`       | 断线后允许重连的最大保留窗口    |
+| `SOCKET_PING_INTERVAL_MS`              | `10000`        | Socket.IO 心跳 ping 周期        |
+| `SOCKET_PING_TIMEOUT_MS`               | `10000`        | Socket.IO 心跳超时时间          |
+| `ROOM_CLEANUP_INTERVAL_MS`             | `1000`         | 断线超时清理任务轮询间隔        |
 | `TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS` | `60`           | Ticket 校验接口单窗口最大请求数 |
 | `CORS_ALLOW_ORIGIN`                    | 非生产默认 `*` | CORS 允许来源                   |
 | `TRUST_PROXY`                          | `false`        | Express trust proxy 配置        |

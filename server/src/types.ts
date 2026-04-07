@@ -2,7 +2,7 @@ export type UserRole = 'host' | 'participant';
 export type MeetingStatus = 'active' | 'ended';
 export type MeetingPhase = 'setup' | 'live';
 
-export type RoomCloseReason = 'HOST_LEFT' | 'HOST_ENDED' | 'HOST_TIMEOUT' | 'ROOM_EXPIRED';
+export type RoomCloseReason = 'HOST_LEFT' | 'HOST_ENDED' | 'HOST_TIMEOUT';
 
 export interface ParticipantWorkSubmission {
   url: string;
@@ -30,8 +30,6 @@ export interface PublicParticipant {
   userName: string;
   role: UserRole;
   joinedAt: number;
-  online: boolean;
-  lastSeenAt: number;
   works?: ParticipantWorks;
 }
 

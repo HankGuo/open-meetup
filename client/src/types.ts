@@ -39,8 +39,6 @@ export interface User {
   userName: string;
   role: UserRole;
   joinedAt: number;
-  online: boolean;
-  lastSeenAt: number;
   works?: ParticipantWorks;
 }
 
@@ -84,5 +82,6 @@ export interface MeetingContextType extends RoomState {
   updatePages: (pages: MeetingPageDefinition[]) => Promise<boolean>;
   importLayoutTemplate: (template: LayoutTemplate) => Promise<boolean>;
   submitMyWork: (pageId: string, url: string, description: string) => Promise<boolean>;
+  revertUploadedImage: (url: string) => Promise<void>;
   clearError: () => void;
 }

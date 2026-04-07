@@ -4,16 +4,28 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { RoomManager } from './roomManager';
 import { clearActiveRoomChannel, emitRoomClosed, registerHandlers } from './handlers';
-import { IS_PRODUCTION } from './config';
+import {
+  IS_PRODUCTION,
+  ROOM_CLEANUP_INTERVAL_MS,
+  SOCKET_PING_INTERVAL_MS,
+  SOCKET_PING_TIMEOUT_MS,
+} from './config';
 import { createAssetStorage } from './assetStorage';
 
 const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 const SOCKET_MAX_HTTP_BUFFER_SIZE_BYTES = 25 * 1024 * 1024;
 const IMAGE_UPLOAD_MAX_BYTES = 2_000_000;
-const ROOM_CLEANUP_INTERVAL_MS = Number(process.env.ROOM_CLEANUP_INTERVAL_MS || 30_000);
 const TICKET_CHECK_RATE_LIMIT_WINDOW_MS = 60_000;
-const TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS = Number(process.env.TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS || 60);
+const TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS = parseRateLimitMaxRequests(
+  process.env.TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS,
+  60,
+);
+const IMAGE_UPLOAD_RATE_LIMIT_WINDOW_MS = 60_000;
+const IMAGE_UPLOAD_RATE_LIMIT_MAX_REQUESTS = parseRateLimitMaxRequests(
+  process.env.IMAGE_UPLOAD_RATE_LIMIT_MAX_REQUESTS,
+  30,
+);
 const TRUST_PROXY = parseTrustProxySetting(process.env.TRUST_PROXY);
 const CORS_ALLOW_ORIGIN = resolveCorsOriginSetting(process.env.CORS_ALLOW_ORIGIN);
 const ACTIVE_ROOM_CHANNEL = 'room:active';
@@ -28,6 +40,8 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
   },
   maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_SIZE_BYTES,
+  pingInterval: SOCKET_PING_INTERVAL_MS,
+  pingTimeout: SOCKET_PING_TIMEOUT_MS,
 });
 
 app.use(
@@ -46,6 +60,24 @@ app.post(
       res.status(400).json({ error: 'Ticket is required.' });
       return;
     }
+    const pageId = resolvePageIdHeader(req.headers['x-open-meetup-page-id']);
+    if (!pageId) {
+      res.status(400).json({ error: 'Page ID is required.' });
+      return;
+    }
+
+    const rateLimitKey = `${getTicketCheckRateLimitKey(req)}:${ticket}`;
+    if (
+      isRateLimited(
+        imageUploadRateState,
+        rateLimitKey,
+        IMAGE_UPLOAD_RATE_LIMIT_WINDOW_MS,
+        IMAGE_UPLOAD_RATE_LIMIT_MAX_REQUESTS,
+      )
+    ) {
+      res.status(429).json({ error: 'Too many image uploads. Please retry later.' });
+      return;
+    }
 
     const mimeType = normalizeMimeType(req.headers['content-type']);
     if (!mimeType.startsWith('image/')) {
@@ -60,7 +92,7 @@ app.post(
     }
 
     try {
-      const result = await roomManager.uploadImageByTicket(ticket, mimeType, buffer);
+      const result = await roomManager.uploadImageByTicket(ticket, mimeType, buffer, pageId);
       if (!result.success) {
         const statusCode = result.error.code === 'NOT_AUTHORIZED' ? 403 : 400;
         res.status(statusCode).json({ error: result.error.message, code: result.error.code });
@@ -78,6 +110,7 @@ const assetStorage = createAssetStorage();
 const roomManager = new RoomManager(undefined, assetStorage);
 registerHandlers(io, roomManager);
 const ticketCheckRateState = new Map<string, { windowStart: number; count: number }>();
+const imageUploadRateState = new Map<string, { windowStart: number; count: number }>();
 
 app.get('/uploads/:roomId/:fileName', async (req, res) => {
   const roomId = sanitizeUploadRoomId(req.params.roomId);
@@ -125,7 +158,14 @@ app.get('/api/room/current', (_req, res) => {
 
 app.get('/api/room/ticket-check', (req, res) => {
   const rateLimitKey = getTicketCheckRateLimitKey(req);
-  if (isRateLimited(ticketCheckRateState, rateLimitKey)) {
+  if (
+    isRateLimited(
+      ticketCheckRateState,
+      rateLimitKey,
+      TICKET_CHECK_RATE_LIMIT_WINDOW_MS,
+      TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS,
+    )
+  ) {
     res.status(429).json({ valid: false, error: 'Too many requests. Please retry later.' });
     return;
   }
@@ -150,6 +190,8 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     activeRooms: roomManager.getActiveRoomCount(),
     disconnectGraceMs: roomManager.getDisconnectGraceMs(),
+    socketPingIntervalMs: SOCKET_PING_INTERVAL_MS,
+    socketPingTimeoutMs: SOCKET_PING_TIMEOUT_MS,
   });
 });
 
@@ -227,7 +269,10 @@ function pruneActiveRoomChannel(io: Server, roomManager: RoomManager): void {
       !identity ||
       typeof identity.userId !== 'string' ||
       typeof identity.sessionId !== 'string' ||
-      !roomManager.isIdentityAuthorized({ userId: identity.userId, sessionId: identity.sessionId })
+      !roomManager.isSocketIdentityAuthorized(socketId, {
+        userId: identity.userId,
+        sessionId: identity.sessionId,
+      })
     ) {
       roomSocket.data.identity = undefined;
       roomSocket.leave(ACTIVE_ROOM_CHANNEL);
@@ -238,17 +283,19 @@ function pruneActiveRoomChannel(io: Server, roomManager: RoomManager): void {
 function isRateLimited(
   state: Map<string, { windowStart: number; count: number }>,
   key: string,
+  windowMs: number,
+  maxRequests: number,
   now = Date.now(),
 ): boolean {
   const existing = state.get(key);
-  if (!existing || now - existing.windowStart > TICKET_CHECK_RATE_LIMIT_WINDOW_MS) {
+  if (!existing || now - existing.windowStart > windowMs) {
     state.set(key, { windowStart: now, count: 1 });
-    compactRateLimiterState(state, now);
+    compactRateLimiterState(state, windowMs, now);
     return false;
   }
 
   existing.count += 1;
-  if (existing.count > TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS) {
+  if (existing.count > maxRequests) {
     return true;
   }
   return false;
@@ -256,16 +303,29 @@ function isRateLimited(
 
 function compactRateLimiterState(
   state: Map<string, { windowStart: number; count: number }>,
+  windowMs: number,
   now = Date.now(),
 ): void {
   if (state.size <= 5000) {
     return;
   }
   for (const [key, value] of state.entries()) {
-    if (now - value.windowStart > TICKET_CHECK_RATE_LIMIT_WINDOW_MS * 2) {
+    if (now - value.windowStart > windowMs * 2) {
       state.delete(key);
     }
   }
+}
+
+function parseRateLimitMaxRequests(rawValue: string | undefined, fallback: number): number {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  const normalized = Math.floor(parsed);
+  if (normalized < 1 || normalized > 10_000) {
+    return fallback;
+  }
+  return normalized;
 }
 
 function parseTrustProxySetting(rawValue: string | undefined): boolean | number {
@@ -357,6 +417,16 @@ function resolveTicketHeader(value: unknown): string {
     return '';
   }
   return value.trim().toUpperCase();
+}
+
+function resolvePageIdHeader(value: unknown): string {
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'string' ? value[0].trim() : '';
+  }
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
 }
 
 function normalizeMimeType(value: unknown): string {

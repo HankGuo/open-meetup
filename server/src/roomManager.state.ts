@@ -71,8 +71,6 @@ export function toPublicParticipant(participant: RoomParticipant): PublicPartici
     userName: participant.userName,
     role: participant.role,
     joinedAt: participant.joinedAt,
-    online: participant.online,
-    lastSeenAt: participant.lastSeenAt,
     works: cloneParticipantWorks(participant.works),
   };
 }

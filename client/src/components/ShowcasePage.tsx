@@ -18,8 +18,17 @@ import { buildServerApiUrl } from '../serverUrl';
 const MAX_IMAGE_FILE_SIZE_BYTES = 1_500_000;
 
 export function ShowcasePage() {
-  const { participants, myRole, myUserId, myTicket, submitMyWork, isConnected, pages, currentStep } =
-    useMeeting();
+  const {
+    participants,
+    myRole,
+    myUserId,
+    myTicket,
+    submitMyWork,
+    revertUploadedImage,
+    isConnected,
+    pages,
+    currentStep,
+  } = useMeeting();
   const [submissionValue, setSubmissionValue] = useState('');
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [localImagePreview, setLocalImagePreview] = useState<string | null>(null);
@@ -160,7 +169,7 @@ export function ShowcasePage() {
         setSubmitError('Ticket 缺失，请重新加入房间');
         return;
       }
-      const uploadedUrl = await uploadImageFile(selectedImageFile, myTicket);
+      const uploadedUrl = await uploadImageFile(selectedImageFile, myTicket, currentPageId);
       if (!uploadedUrl) {
         setSubmitError('图片上传失败，请稍后重试');
         return;
@@ -173,6 +182,9 @@ export function ShowcasePage() {
     const success = await submitMyWork(currentPageId, normalizedContent, normalizedDescription);
     setSubmitting(false);
     if (!success) {
+      if (submissionMode === 'image' && normalizedContent) {
+        await revertUploadedImage(normalizedContent);
+      }
       setSubmitError('提交失败，请稍后重试');
     }
   }
@@ -407,7 +419,6 @@ export function ShowcasePage() {
                               {participant.userName}
                             </p>
                             <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--text-soft)]">
-                              <span>{participant.online ? '在线' : '离线'}</span>
                               <span className="showcase-work-state showcase-work-state--submitted">
                                 已提交
                               </span>
@@ -550,9 +561,12 @@ function resolveShowcasePageTitle(rawTitle: string | undefined): string {
   return title;
 }
 
-async function uploadImageFile(file: File, ticket: string): Promise<string | null> {
+async function uploadImageFile(file: File, ticket: string, pageId: string): Promise<string | null> {
   const mimeType = file.type?.trim().toLowerCase() || '';
   if (!mimeType.startsWith('image/')) {
+    return null;
+  }
+  if (!pageId.trim()) {
     return null;
   }
 
@@ -562,6 +576,7 @@ async function uploadImageFile(file: File, ticket: string): Promise<string | nul
       headers: {
         'Content-Type': mimeType,
         'X-Open-Meetup-Ticket': ticket,
+        'X-Open-Meetup-Page-Id': pageId,
       },
       body: file,
     });

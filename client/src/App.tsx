@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MeetingProvider, useMeeting } from './context/MeetingContext';
 import { Lobby } from './components/Lobby';
 import { JoinPage } from './components/JoinPage';
@@ -13,23 +13,25 @@ type AppView = 'checking' | 'lobby' | 'join' | 'room';
 function AppContent() {
   const { myRole, myUserId } = useMeeting();
   const [view, setView] = useState<AppView>('checking');
+  const checkingRef = useRef(false);
+  const inRoomRef = useRef(false);
 
   useEffect(() => {
-    void checkServerState();
-  }, []);
+    inRoomRef.current = Boolean(myUserId && (myRole === 'host' || myRole === 'participant'));
+  }, [myRole, myUserId]);
 
-  useEffect(() => {
-    if (myUserId && (myRole === 'host' || myRole === 'participant')) {
-      setView('room');
+  const checkServerState = useCallback(async () => {
+    if (checkingRef.current) {
       return;
     }
-    void checkServerState();
-  }, [myUserId, myRole]);
-
-  async function checkServerState() {
+    checkingRef.current = true;
     try {
       const response = await fetch(buildServerApiUrl('/api/room/current'));
       const data = await response.json();
+
+      if (inRoomRef.current) {
+        return;
+      }
 
       if (!data.exists) {
         clearRoomEntryStorage();
@@ -38,10 +40,27 @@ function AppContent() {
         setView('join');
       }
     } catch {
-      clearRoomEntryStorage();
-      setView('lobby');
+      setView((currentView) => (currentView === 'checking' ? 'lobby' : currentView));
+    } finally {
+      checkingRef.current = false;
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (myUserId && (myRole === 'host' || myRole === 'participant')) {
+      setView('room');
+      return;
+    }
+
+    void checkServerState();
+    const timer = window.setInterval(() => {
+      void checkServerState();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [checkServerState, myRole, myUserId]);
 
   if (view === 'checking') {
     return (
