@@ -47,6 +47,8 @@ import {
 const PARTICIPANT_TICKET_PREFIX = 'TKT-';
 const PARTICIPANT_TICKET_RANDOM_LENGTH = 12;
 const HOST_TICKET_RANDOM_LENGTH = 12;
+/** Ticket 生成时的最大重试次数，防止无限循环 */
+const TICKET_GENERATION_MAX_ATTEMPTS = 20;
 type AuthContext = { room: Room; participant: RoomParticipant };
 
 type RoomOperationResult = SocketResult<{
@@ -108,27 +110,27 @@ export class RoomManager {
   ): SocketResult<RoomStateSync> {
     const existingRoom = this.getActiveRoom();
     if (existingRoom) {
-      return this.fail('A room already exists. Please end the current room first.', 'ROOM_EXISTS');
+      return this.fail('已存在一个房间，请先结束当前房间', 'ROOM_EXISTS');
     }
 
     const userName = sanitizeUserName(hostUserName);
     const roomTitle = sanitizeTitle(title);
     if (!userName) {
-      return this.fail('Name is required', 'BAD_REQUEST');
+      return this.fail('请填写用户名', 'BAD_REQUEST');
     }
     if (!roomTitle) {
-      return this.fail('Title is required', 'BAD_REQUEST');
+      return this.fail('请填写房间标题', 'BAD_REQUEST');
     }
     const participantLimit = sanitizeParticipantLimit(participantLimitInput);
     if (participantLimit == null) {
       return this.fail(
-        `Participant limit must be between ${ROOM_PARTICIPANT_LIMIT_MIN} and ${ROOM_PARTICIPANT_LIMIT_MAX}`,
+        `参与人数上限须在 ${ROOM_PARTICIPANT_LIMIT_MIN} 到 ${ROOM_PARTICIPANT_LIMIT_MAX} 之间`,
         'BAD_REQUEST',
       );
     }
 
     if (password !== HOST_PASSWORD) {
-      return this.fail('Invalid password', 'INVALID_PASSWORD');
+      return this.fail('密码错误', 'INVALID_PASSWORD');
     }
 
     this.detachSocket(socketId);
@@ -177,23 +179,23 @@ export class RoomManager {
   joinRoom(userNameInput: string, socketId: string, ticket?: string): SocketResult<RoomStateSync> {
     const room = this.getActiveRoom();
     if (!room) {
-      return this.fail('Room not found', 'ROOM_NOT_FOUND');
+      return this.fail('房间不存在', 'ROOM_NOT_FOUND');
     }
     if (room.status === 'ended') {
-      return this.fail('Room is closed', 'ROOM_CLOSED');
+      return this.fail('房间已关闭', 'ROOM_CLOSED');
     }
 
     this.detachSocket(socketId);
 
     const requestedTicket = typeof ticket === 'string' ? normalizeTicket(ticket) : '';
     if (ticket != null && !requestedTicket) {
-      return this.fail('Invalid ticket', 'INVALID_TICKET');
+      return this.fail('无效的 Ticket', 'INVALID_TICKET');
     }
 
     if (requestedTicket) {
       const participant = this.findParticipantByTicket(room, requestedTicket);
       if (!participant) {
-        return this.fail('Invalid ticket', 'INVALID_TICKET');
+        return this.fail('无效的 Ticket', 'INVALID_TICKET');
       }
 
       if (participant.socketId && participant.socketId !== socketId) {
@@ -221,10 +223,10 @@ export class RoomManager {
 
     const userName = sanitizeUserName(userNameInput);
     if (!userName) {
-      return this.fail('Invalid user name', 'BAD_REQUEST');
+      return this.fail('用户名无效', 'BAD_REQUEST');
     }
     if (getParticipantAudienceCount(room) >= room.participantLimit) {
-      return this.fail('Room is full', 'ROOM_FULL');
+      return this.fail('房间已满', 'ROOM_FULL');
     }
 
     const now = Date.now();
@@ -257,20 +259,20 @@ export class RoomManager {
 
   reconnect(identity: SocketIdentity, socketId: string): SocketResult<RoomStateSync> {
     if (!identity.userId || !identity.sessionId) {
-      return this.fail('Invalid reconnect payload', 'BAD_REQUEST');
+      return this.fail('重连参数无效', 'BAD_REQUEST');
     }
 
     const room = this.getActiveRoom();
     if (!room) {
-      return this.fail('Room not found', 'ROOM_NOT_FOUND');
+      return this.fail('房间不存在', 'ROOM_NOT_FOUND');
     }
 
     const participant = room.participants.get(identity.userId);
     if (!participant) {
-      return this.fail('User not found in room', 'USER_NOT_FOUND');
+      return this.fail('用户不在房间中', 'USER_NOT_FOUND');
     }
     if (participant.sessionId !== identity.sessionId) {
-      return this.fail('Session expired', 'SESSION_EXPIRED');
+      return this.fail('会话已过期', 'SESSION_EXPIRED');
     }
 
     if (participant.socketId && participant.socketId !== socketId) {
@@ -300,7 +302,7 @@ export class RoomManager {
   async leaveRoom(identity: SocketIdentity): Promise<LeaveResult> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return { ok: false, error: this.error('Not authenticated', 'NOT_AUTHENTICATED') };
+      return { ok: false, error: this.error('未认证', 'NOT_AUTHENTICATED') };
     }
 
     const { room, participant } = auth;
@@ -335,10 +337,10 @@ export class RoomManager {
   nextStep(identity: SocketIdentity): RoomOperationResult {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
     if (auth.room.phase !== 'live') {
       return this.fail('请先开始播放后再切换页面', 'BAD_REQUEST');
@@ -360,10 +362,10 @@ export class RoomManager {
   prevStep(identity: SocketIdentity): RoomOperationResult {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
     if (auth.room.phase !== 'live') {
       return this.fail('请先开始播放后再切换页面', 'BAD_REQUEST');
@@ -384,13 +386,13 @@ export class RoomManager {
   startLive(identity: SocketIdentity): RoomOperationResult {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
     if (auth.room.status !== 'active') {
-      return this.fail('Room is not active', 'ROOM_NOT_ACTIVE');
+      return this.fail('房间未处于活动状态', 'ROOM_NOT_ACTIVE');
     }
     if (auth.room.pages.length === 0) {
       return this.fail('至少保留一个页面后再开始', 'BAD_REQUEST');
@@ -410,13 +412,13 @@ export class RoomManager {
   returnToSetup(identity: SocketIdentity): RoomOperationResult {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
     if (auth.room.status !== 'active') {
-      return this.fail('Room is not active', 'ROOM_NOT_ACTIVE');
+      return this.fail('房间未处于活动状态', 'ROOM_NOT_ACTIVE');
     }
 
     auth.room.phase = 'setup';
@@ -440,10 +442,10 @@ export class RoomManager {
   ): SocketResult<RoomStateSync> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
     if (auth.room.phase !== 'setup') {
       return this.fail('播放阶段不允许编辑页面内容', 'BAD_REQUEST');
@@ -477,10 +479,10 @@ export class RoomManager {
   ): Promise<SocketResult<RoomStateSync>> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
     if (auth.room.phase !== 'setup') {
       return this.fail('播放阶段不允许调整页面', 'BAD_REQUEST');
@@ -511,10 +513,10 @@ export class RoomManager {
   ): Promise<SocketResult<RoomStateSync>> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
     if (auth.room.phase !== 'setup') {
       return this.fail('播放阶段不允许导入编排模板', 'BAD_REQUEST');
@@ -540,10 +542,10 @@ export class RoomManager {
   async forceEndRoom(identity: SocketIdentity): Promise<SocketResult<{ closed: boolean }>> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'host') {
-      return this.fail('Only host can perform this action', 'NOT_AUTHORIZED');
+      return this.fail('仅主持人可执行此操作', 'NOT_AUTHORIZED');
     }
 
     await this.closeRoom();
@@ -562,10 +564,10 @@ export class RoomManager {
   ): Promise<WorkSubmitResult> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'participant') {
-      return this.fail('Only participant can submit work', 'NOT_AUTHORIZED');
+      return this.fail('仅参与者可提交作品', 'NOT_AUTHORIZED');
     }
     if (auth.room.phase !== 'live') {
       return this.fail('仅播放阶段允许提交互动内容', 'BAD_REQUEST');
@@ -626,10 +628,10 @@ export class RoomManager {
   ): Promise<SocketResult<{ url: string }>> {
     const room = this.getActiveRoom();
     if (!room) {
-      return this.fail('Room not found', 'ROOM_NOT_FOUND');
+      return this.fail('房间不存在', 'ROOM_NOT_FOUND');
     }
     if (room.status !== 'active') {
-      return this.fail('Room is not active', 'ROOM_NOT_ACTIVE');
+      return this.fail('房间未处于活动状态', 'ROOM_NOT_ACTIVE');
     }
     if (room.phase !== 'live') {
       return this.fail('仅播放阶段允许上传互动内容', 'BAD_REQUEST');
@@ -637,15 +639,15 @@ export class RoomManager {
 
     const ticket = normalizeTicket(ticketInput);
     if (!ticket) {
-      return this.fail('Invalid ticket', 'INVALID_TICKET');
+      return this.fail('无效的 Ticket', 'INVALID_TICKET');
     }
 
     const participant = this.findParticipantByTicket(room, ticket);
     if (!participant) {
-      return this.fail('Invalid ticket', 'INVALID_TICKET');
+      return this.fail('无效的 Ticket', 'INVALID_TICKET');
     }
     if (participant.role !== 'participant') {
-      return this.fail('Only participant can upload image', 'NOT_AUTHORIZED');
+      return this.fail('仅参与者可上传图片', 'NOT_AUTHORIZED');
     }
 
     const pageId = sanitizePageId(pageIdInput);
@@ -679,13 +681,13 @@ export class RoomManager {
   ): Promise<SocketResult<{ reverted: boolean }>> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     if (auth.participant.role !== 'participant') {
-      return this.fail('Only participant can revert upload', 'NOT_AUTHORIZED');
+      return this.fail('仅参与者可撤销上传', 'NOT_AUTHORIZED');
     }
     if (auth.room.status !== 'active') {
-      return this.fail('Room is not active', 'ROOM_NOT_ACTIVE');
+      return this.fail('房间未处于活动状态', 'ROOM_NOT_ACTIVE');
     }
 
     const uploadUrl = normalizeManagedUploadUrlForRoom(uploadUrlInput, auth.room.id);
@@ -706,7 +708,7 @@ export class RoomManager {
   getStateByIdentity(identity: SocketIdentity): SocketResult<RoomStateSync> {
     const auth = this.authorize(identity);
     if (!auth) {
-      return this.fail('Not authenticated', 'NOT_AUTHENTICATED');
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
     }
     return {
       success: true,
@@ -791,7 +793,7 @@ export class RoomManager {
   }> {
     const room = this.getActiveRoom();
     if (!room) {
-      return this.fail('Room not found', 'ROOM_NOT_FOUND');
+      return this.fail('房间不存在', 'ROOM_NOT_FOUND');
     }
     return {
       success: true,
@@ -915,7 +917,7 @@ export class RoomManager {
   }
 
   private generateParticipantTicket(room: Room): string {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < TICKET_GENERATION_MAX_ATTEMPTS; attempt += 1) {
       const candidate =
         PARTICIPANT_TICKET_PREFIX +
         randomUUID().replace(/-/g, '').slice(0, PARTICIPANT_TICKET_RANDOM_LENGTH).toUpperCase();

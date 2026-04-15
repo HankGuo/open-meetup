@@ -401,7 +401,7 @@ export function ShowcasePage() {
                             src={submission.url}
                             title={`${participant.userName}-work-thumb`}
                             className="pointer-events-none h-full w-full border-0"
-                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                            sandbox="allow-scripts allow-forms allow-popups"
                           />
                         )}
 
@@ -489,7 +489,7 @@ export function ShowcasePage() {
                   src={selectedWork.submission.url}
                   title={`${selectedWork.participant.userName}-work-fullscreen`}
                   className="h-full w-full border-0"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                  sandbox="allow-scripts allow-forms allow-popups"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center px-6 text-center text-sm text-[var(--text-soft)]">
