@@ -29,3 +29,5 @@ tmp/
 
 # local agent config
 .claude/
+server/node_modules
+dist-electron-old2/

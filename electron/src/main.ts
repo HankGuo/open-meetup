@@ -196,7 +196,8 @@ function createMainWindow(port: number): BrowserWindow {
   // In production (packaged) the client is served by the Express server
   // via the static middleware we inject. In dev we also use the server URL
   // because the built client is served the same way.
-  win.loadURL(`http://127.0.0.1:${port}`);
+  // 使用 localhost 访问本机 proxy
+  win.loadURL(`http://localhost:${port}`);
 
   win.on('closed', () => {
     mainWindow = null;
@@ -545,57 +546,45 @@ function sendFile(filePath: string, res: http.ServerResponse): void {
 let proxyPort = 0; // The port the user-facing proxy runs on
 
 async function launchApp(config: AppConfig): Promise<void> {
-  const backendPort = config.port;
+  // 用户配置的端口 = 用户和参与者访问的端口（proxy）
+  // backend 使用 port+1（内部端口，用户无需关心）
+  const userFacingPort = config.port;
+  const internalBackendPort = config.port + 1;
 
-  // 1. Start the backend server
-  console.log(`[main] Starting server on port ${backendPort}...`);
-  serverProcess = startServer(config);
+  // 1. Start the backend server on internal port
+  const internalConfig = { ...config, port: internalBackendPort };
+  console.log(`[main] Starting server on internal port ${internalBackendPort}...`);
+  serverProcess = startServer(internalConfig);
 
   // 2. Wait for the server to be ready
   try {
-    await waitForServer(backendPort);
+    await waitForServer(internalBackendPort);
     console.log('[main] Server is ready');
   } catch (err) {
     console.error('[main] Server failed to start:', err);
-    dialog.showErrorBox('启动失败', `服务启动超时，请检查端口 ${backendPort} 是否被占用。`);
+    dialog.showErrorBox('启动失败', `服务启动超时，请检查端口是否被占用。`);
     killServer();
     app.quit();
     return;
   }
 
-  // 3. Start the client proxy on proxyPort (= backendPort + 1 by default,
-  //    but the user sees backendPort as "the port"). To keep things simple,
-  //    the user-facing port IS the proxy port, and the backend port is internal.
-  //    Let's reassign: backend uses an internal port, proxy uses config.port.
-  //    But we can't change the backend port after fork()...
-  //
-  //    Solution: backend on config.port, proxy on config.port + 1000 (internal).
-  //    Actually — let the proxy run on config.port and backend on config.port+1.
-  //    But the backend is already started on config.port...
-  //
-  //    Simplest: proxy runs on a different port. The user-facing URL is the
-  //    proxy port. Let's use backendPort + 100 or find a free port.
-  //
-  //    REVISED: backend runs on backendPort (from config). Proxy runs on
-  //    backendPort + 1000. The main window loads from the proxy. The LAN
-  //    URL shared is the proxy URL. This keeps it clean.
-
-  const clientProxyPort = backendPort + 1000;
+  // 3. Start the client proxy on user-facing port
+  //    用户配置 3001 → 参与者访问 3001（proxy）→ proxy 内部转发到 3002（backend）
   try {
-    proxyPort = await startClientProxy(backendPort, clientProxyPort, CLIENT_DIST);
-    console.log(`[main] Client proxy ready on port ${proxyPort}`);
+    proxyPort = await startClientProxy(internalBackendPort, userFacingPort, CLIENT_DIST);
+    console.log(`[main] Proxy ready on port ${proxyPort}, backend on ${internalBackendPort}`);
   } catch (err) {
     console.error('[main] Client proxy failed:', err);
-    dialog.showErrorBox('启动失败', '客户端代理启动失败。');
+    dialog.showErrorBox('启动失败', `端口 ${userFacingPort} 被占用，请在设置中更换端口。`);
     killServer();
     app.quit();
     return;
   }
 
-  // 4. Create main window
+  // 4. Create main window — loads from proxy port
   mainWindow = createMainWindow(proxyPort);
 
-  // 5. Create tray
+  // 5. Create tray — shows LAN IP + user-facing port
   _tray = createTray(proxyPort);
 }
 
