@@ -1,5 +1,6 @@
 import express, { Request } from 'express';
 import http from 'http';
+import path from 'path';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { RoomManager } from './roomManager';
@@ -245,6 +246,22 @@ app.get('/health', (_req, res) => {
     socketPingTimeoutMs: SOCKET_PING_TIMEOUT_MS,
   });
 });
+
+// Electron 模式：通过 CLIENT_DIST_PATH 环境变量直接托管前端静态文件
+// 非 Electron 模式（开发）：前端由 Vite dev server 独立提供
+const CLIENT_DIST_PATH = process.env.CLIENT_DIST_PATH;
+if (CLIENT_DIST_PATH) {
+  const resolvedClientPath = path.resolve(CLIENT_DIST_PATH);
+  app.use(express.static(resolvedClientPath));
+  // SPA fallback：所有非 API/uploads 请求返回 index.html
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/') || req.path === '/health') {
+      return next();
+    }
+    res.sendFile(path.join(resolvedClientPath, 'index.html'));
+  });
+  console.log(`[server] Serving client from: ${resolvedClientPath}`);
+}
 
 server.listen(PORT, HOST, () => {
   const bindUrl = `http://${HOST}:${PORT}`;

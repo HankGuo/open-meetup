@@ -132,6 +132,7 @@ function startServer(config: AppConfig): ChildProcess {
     HOST_PASSWORD: config.hostPassword,
     CORS_ALLOW_ORIGIN: '*',
     NODE_ENV: 'development', // avoid production CORS / password strictness
+    CLIENT_DIST_PATH: CLIENT_DIST, // 让 Express 直接托管前端静态文件，无需 proxy
   };
 
   // Verify server entry exists
@@ -381,163 +382,7 @@ function createTrayIcon(): Electron.NativeImage {
 }
 
 // ---------------------------------------------------------------------------
-// Client proxy — serves static client files and proxies API/socket.io
-// to the backend server. This allows the client to use window.location.origin
-// for API calls (production mode) while keeping server code unmodified.
-// ---------------------------------------------------------------------------
-
-function startClientProxy(backendPort: number, proxyPort: number, clientDistPath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      const url = req.url || '/';
-
-      // Proxy API requests, health, uploads, and socket.io to backend
-      if (
-        url.startsWith('/api/') ||
-        url.startsWith('/health') ||
-        url.startsWith('/uploads/') ||
-        url.startsWith('/socket.io/')
-      ) {
-        const proxyReq = http.request(
-          {
-            hostname: '127.0.0.1',
-            port: backendPort,
-            path: url,
-            method: req.method,
-            headers: req.headers,
-          },
-          (proxyRes) => {
-            res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
-            proxyRes.pipe(res);
-          },
-        );
-        proxyReq.on('error', (_err) => {
-          res.writeHead(502);
-          res.end('Bad Gateway');
-        });
-        req.pipe(proxyReq);
-        return;
-      }
-
-      // Serve static files from client dist
-      serveStaticFile(clientDistPath, url, res);
-    });
-
-    // Handle WebSocket upgrades for socket.io
-    server.on('upgrade', (req, socket, _head) => {
-      const options = {
-        hostname: '127.0.0.1',
-        port: backendPort,
-        path: req.url,
-        method: req.method,
-        headers: req.headers,
-      };
-
-      const proxyReq = http.request(options);
-      proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
-        socket.write(
-          `HTTP/1.1 ${proxyRes.statusCode || 101} ${proxyRes.statusMessage || 'Switching Protocols'}\r\n` +
-            Object.entries(proxyRes.headers)
-              .map(([k, v]) => `${k}: ${v}`)
-              .join('\r\n') +
-            '\r\n\r\n',
-        );
-        if (proxyHead.length > 0) {
-          socket.write(proxyHead);
-        }
-        proxySocket.pipe(socket);
-        socket.pipe(proxySocket);
-      });
-      proxyReq.on('error', () => {
-        socket.destroy();
-      });
-      proxyReq.end();
-    });
-
-    server.listen(proxyPort, '0.0.0.0', () => {
-      console.log(`[proxy] Client proxy listening on port ${proxyPort}`);
-      resolve(proxyPort);
-    });
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        // Try next port
-        server.listen(proxyPort + 1, '0.0.0.0');
-      } else {
-        reject(err);
-      }
-    });
-  });
-}
-
-function serveStaticFile(basePath: string, urlPath: string, res: http.ServerResponse): void {
-  // Strip query params
-  const cleanPath = urlPath.split('?')[0];
-
-  // Map URL to filesystem
-  const filePath = path.join(basePath, cleanPath);
-
-  // Security: prevent path traversal
-  if (!filePath.startsWith(basePath)) {
-    res.writeHead(403);
-    res.end('Forbidden');
-    return;
-  }
-
-  // Try to serve the file; fall back to index.html (SPA routing)
-  fs.stat(filePath, (err, stats) => {
-    if (!err && stats.isFile()) {
-      sendFile(filePath, res);
-    } else if (!err && stats.isDirectory()) {
-      const indexPath = path.join(filePath, 'index.html');
-      fs.stat(indexPath, (err2) => {
-        if (!err2) {
-          sendFile(indexPath, res);
-        } else {
-          sendFile(path.join(basePath, 'index.html'), res);
-        }
-      });
-    } else {
-      // SPA fallback
-      sendFile(path.join(basePath, 'index.html'), res);
-    }
-  });
-}
-
-function sendFile(filePath: string, res: http.ServerResponse): void {
-  const ext = path.extname(filePath).toLowerCase();
-  const mimeTypes: Record<string, string> = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'application/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
-    '.woff': 'font/woff',
-    '.woff2': 'font/woff2',
-    '.ttf': 'font/ttf',
-    '.webp': 'image/webp',
-    '.avif': 'image/avif',
-  };
-
-  const contentType = mimeTypes[ext] || 'application/octet-stream';
-
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      res.end('Not Found');
-      return;
-    }
-    res.writeHead(200, {
-      'Content-Type': contentType,
-      'Content-Length': data.length,
-    });
-    res.end(data);
-  });
-}
+// (Proxy 已移除 — Express 通过 CLIENT_DIST_PATH 直接托管静态文件，单端口架构)
 
 // ---------------------------------------------------------------------------
 // App lifecycle
@@ -546,46 +391,33 @@ function sendFile(filePath: string, res: http.ServerResponse): void {
 let proxyPort = 0; // The port the user-facing proxy runs on
 
 async function launchApp(config: AppConfig): Promise<void> {
-  // 用户配置的端口 = 用户和参与者访问的端口（proxy）
-  // backend 使用 port+1（内部端口，用户无需关心）
-  const userFacingPort = config.port;
-  const internalBackendPort = config.port + 1;
+  // 单端口架构：Express 同时托管 API + Socket.IO + 前端静态文件
+  // 用户配置的端口 = 所有人访问的端口，零 proxy
+  const port = config.port;
 
-  // 1. Start the backend server on internal port
-  const internalConfig = { ...config, port: internalBackendPort };
-  console.log(`[main] Starting server on internal port ${internalBackendPort}...`);
-  serverProcess = startServer(internalConfig);
+  // 1. Start the server (Express 内置静态文件托管，通过 CLIENT_DIST_PATH 环境变量)
+  console.log(`[main] Starting server on port ${port}...`);
+  serverProcess = startServer(config);
 
   // 2. Wait for the server to be ready
   try {
-    await waitForServer(internalBackendPort);
+    await waitForServer(port);
     console.log('[main] Server is ready');
   } catch (err) {
     console.error('[main] Server failed to start:', err);
-    dialog.showErrorBox('启动失败', `服务启动超时，请检查端口是否被占用。`);
+    dialog.showErrorBox('启动失败', `端口 ${port} 被占用，请在设置中更换端口。`);
     killServer();
     app.quit();
     return;
   }
 
-  // 3. Start the client proxy on user-facing port
-  //    用户配置 3001 → 参与者访问 3001（proxy）→ proxy 内部转发到 3002（backend）
-  try {
-    proxyPort = await startClientProxy(internalBackendPort, userFacingPort, CLIENT_DIST);
-    console.log(`[main] Proxy ready on port ${proxyPort}, backend on ${internalBackendPort}`);
-  } catch (err) {
-    console.error('[main] Client proxy failed:', err);
-    dialog.showErrorBox('启动失败', `端口 ${userFacingPort} 被占用，请在设置中更换端口。`);
-    killServer();
-    app.quit();
-    return;
-  }
+  proxyPort = port;
 
-  // 4. Create main window — loads from proxy port
-  mainWindow = createMainWindow(proxyPort);
+  // 3. Create main window
+  mainWindow = createMainWindow(port);
 
-  // 5. Create tray — shows LAN IP + user-facing port
-  _tray = createTray(proxyPort);
+  // 4. Create tray — shows LAN IP for sharing
+  _tray = createTray(port);
 }
 
 app.whenReady().then(async () => {
