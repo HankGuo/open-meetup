@@ -19,10 +19,12 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import JSZip from 'jszip';
 import { useMeeting } from '../context/MeetingContext';
 import { createNewPage } from '../meetingConfig';
 import { getDefaultPageTitle as getDefaultPageTitleByKind } from '../pageCatalog';
-import { LayoutTemplate, MeetingPageDefinition, PageSubmissionMode } from '../types';
+import { buildServerApiUrl } from '../serverUrl';
+import { LayoutTemplate, MeetingPageDefinition, PageContent, PageSubmissionMode } from '../types';
 import { PageEditor } from './PageEditor';
 
 interface HostSetupBoardProps {
@@ -50,7 +52,8 @@ export function HostSetupBoard({
   onLeaveRoom,
   onEndRoom,
 }: HostSetupBoardProps) {
-  const { pages, pageContents, updatePages, importLayoutTemplate, startLive, isConnected } = useMeeting();
+  const { pages, pageContents, updatePages, importLayoutTemplate, startLive, isConnected, myTicket } =
+    useMeeting();
   const [draftPages, setDraftPages] = useState<MeetingPageDefinition[]>(pages);
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -69,7 +72,10 @@ export function HostSetupBoard({
     type: 'error' | 'success';
     message: string;
   } | null>(null);
-  const [pendingTemplateImport, setPendingTemplateImport] = useState<LayoutTemplate | null>(null);
+  const [pendingTemplateImport, setPendingTemplateImport] = useState<{
+    zip: JSZip;
+    template: LayoutTemplate;
+  } | null>(null);
 
   useEffect(() => {
     setDraftPages(pages);
@@ -215,16 +221,44 @@ export function HostSetupBoard({
     };
   }
 
-  function handleExportTemplate() {
+  async function handleExportTemplate() {
     try {
       const templateData = buildTemplateData();
-      const serialized = JSON.stringify(templateData, null, 2);
-      const fileBlob = new Blob([serialized], { type: 'application/json' });
-      const objectUrl = URL.createObjectURL(fileBlob);
+      const zip = new JSZip();
+      const assetsFolder = zip.folder('assets')!;
+      let assetIndex = 0;
+
+      const resolvedContents: Array<[string, PageContent]> = [];
+      for (const entry of templateData.pageContents ?? []) {
+        const [pageId, pageContent] = entry;
+        if (pageContent.type === 'canvas') {
+          const { content: rewritten, extractedAssets } = extractExcalidrawAssets(pageContent.content);
+          for (const asset of extractedAssets) {
+            assetsFolder.file(asset.fileName, asset.data);
+          }
+          resolvedContents.push([pageId, { type: 'canvas', content: rewritten }]);
+        } else if (pageContent.type === 'image' && pageContent.content.startsWith('/uploads/')) {
+          const assetFileName = `img-${assetIndex++}${extensionFromPath(pageContent.content)}`;
+          const blob = await fetch(buildServerApiUrl(pageContent.content)).then((r) => r.blob());
+          assetsFolder.file(assetFileName, blob);
+          resolvedContents.push([pageId, { type: 'image', content: `assets/${assetFileName}` }]);
+        } else {
+          resolvedContents.push([pageId, pageContent]);
+        }
+      }
+
+      const exportPayload: LayoutTemplate = {
+        ...templateData,
+        pageContents: resolvedContents,
+      };
+      zip.file('template.json', JSON.stringify(exportPayload, null, 2));
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       link.href = objectUrl;
-      link.download = `open-meetup-layout-${timestamp}.json`;
+      link.download = `open-meetup-layout-${timestamp}.zip`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -249,15 +283,19 @@ export function HostSetupBoard({
       return;
     }
 
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(await file.text());
+      const zip = await JSZip.loadAsync(file);
+      const templateFile = zip.file('template.json');
+      if (!templateFile) {
+        setTemplateFeedback({ type: 'error', message: '无效的模板 ZIP：缺少 template.json。' });
+        return;
+      }
+      const parsed = JSON.parse(await templateFile.async('text')) as LayoutTemplate;
+      setTemplateFeedback(null);
+      setPendingTemplateImport({ zip, template: parsed });
     } catch {
-      setTemplateFeedback({ type: 'error', message: '模板文件不是有效的 JSON。' });
-      return;
+      setTemplateFeedback({ type: 'error', message: '无法读取模板文件，请确认为有效的 ZIP 格式。' });
     }
-    setTemplateFeedback(null);
-    setPendingTemplateImport(parsed as LayoutTemplate);
   }
 
   async function handleConfirmImportTemplate() {
@@ -266,19 +304,30 @@ export function HostSetupBoard({
     }
 
     setImportingTemplate(true);
-    const success = await importLayoutTemplate(pendingTemplateImport);
-    setImportingTemplate(false);
-    if (!success) {
+    try {
+      const { zip, template } = pendingTemplateImport;
+      const resolvedTemplate = await resolveZipTemplateAssets(zip, template, myTicket);
+      const success = await importLayoutTemplate(resolvedTemplate);
+      setImportingTemplate(false);
+      if (!success) {
+        setPendingTemplateImport(null);
+        setTemplateFeedback({
+          type: 'error',
+          message: '导入失败：请确认模板格式正确，并且当前处于编排阶段。',
+        });
+        return;
+      }
+
+      setPendingTemplateImport(null);
+      setTemplateFeedback({ type: 'success', message: '编排模板导入成功。' });
+    } catch {
+      setImportingTemplate(false);
       setPendingTemplateImport(null);
       setTemplateFeedback({
         type: 'error',
-        message: '导入失败：请确认模板格式正确，并且当前处于编排阶段。',
+        message: '导入失败：上传模板资源时出错。',
       });
-      return;
     }
-
-    setPendingTemplateImport(null);
-    setTemplateFeedback({ type: 'success', message: '编排模板导入成功。' });
   }
 
   const pageCountLabel = saving ? '同步中...' : `已编排 ${draftPages.length} 页`;
@@ -604,7 +653,7 @@ export function HostSetupBoard({
       <input
         ref={templateFileInputRef}
         type="file"
-        accept="application/json,.json"
+        accept=".zip,application/zip"
         className="hidden"
         onChange={(event) => {
           void handleImportTemplateFile(event);
@@ -789,4 +838,240 @@ function getPageMeta(page: MeetingPageDefinition): {
 
 function getDefaultPageTitle(page: MeetingPageDefinition): string {
   return getDefaultPageTitleByKind(page.kind);
+}
+
+// ---------------------------------------------------------------------------
+// ZIP template helpers
+// ---------------------------------------------------------------------------
+
+interface ExtractedAsset {
+  fileName: string;
+  data: Uint8Array;
+}
+
+function extractExcalidrawAssets(serialized: string): {
+  content: string;
+  extractedAssets: ExtractedAsset[];
+} {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(serialized) as Record<string, unknown>;
+  } catch {
+    return { content: serialized, extractedAssets: [] };
+  }
+
+  const files = parsed.files as
+    | Record<string, { id: string; dataURL: string; mimeType?: string }>
+    | undefined;
+  if (!files || typeof files !== 'object') {
+    return { content: serialized, extractedAssets: [] };
+  }
+
+  const assets: ExtractedAsset[] = [];
+  const rewrittenFiles: Record<string, unknown> = {};
+
+  for (const [fileId, fileData] of Object.entries(files)) {
+    if (!fileData?.dataURL || typeof fileData.dataURL !== 'string') {
+      rewrittenFiles[fileId] = fileData;
+      continue;
+    }
+    const dataUrl = fileData.dataURL;
+    const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/);
+    if (!match) {
+      rewrittenFiles[fileId] = fileData;
+      continue;
+    }
+    const mime = match[1] || 'application/octet-stream';
+    const base64 = match[2];
+    const ext = mimeToExtension(mime);
+    const fileName = `exc-${fileId}${ext}`;
+    const binary = base64ToUint8Array(base64);
+    assets.push({ fileName, data: binary });
+    rewrittenFiles[fileId] = { ...fileData, dataURL: `assets/${fileName}` };
+  }
+
+  if (assets.length === 0) {
+    return { content: serialized, extractedAssets: [] };
+  }
+
+  parsed.files = rewrittenFiles;
+  return { content: JSON.stringify(parsed), extractedAssets: assets };
+}
+
+function mimeToExtension(mime: string): string {
+  if (mime === 'image/png') return '.png';
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return '.jpg';
+  if (mime === 'image/webp') return '.webp';
+  if (mime === 'image/gif') return '.gif';
+  if (mime === 'image/svg+xml') return '.svg';
+  if (mime === 'image/avif') return '.avif';
+  if (mime === 'image/bmp') return '.bmp';
+  return '.bin';
+}
+
+function extensionFromPath(urlPath: string): string {
+  const match = urlPath.match(/(\.[a-zA-Z0-9]+)$/);
+  return match ? match[1] : '.bin';
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function uint8ArrayToDataUrl(data: Uint8Array, mime: string): string {
+  let binary = '';
+  for (let i = 0; i < data.length; i++) {
+    binary += String.fromCharCode(data[i]);
+  }
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
+function guessMimeFromFileName(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.svg')) return 'image/svg+xml';
+  if (lower.endsWith('.avif')) return 'image/avif';
+  if (lower.endsWith('.bmp')) return 'image/bmp';
+  return 'application/octet-stream';
+}
+
+async function uploadTemplateAssetToServer(blob: Blob, mimeType: string, ticket: string): Promise<string> {
+  const response = await fetch(buildServerApiUrl('/api/uploads/template-asset'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': mimeType,
+      'X-Open-Meetup-Ticket': ticket,
+    },
+    body: blob,
+  });
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.status}`);
+  }
+  const data = (await response.json()) as { url?: string };
+  if (typeof data.url !== 'string' || !data.url.startsWith('/uploads/')) {
+    throw new Error('Invalid upload response');
+  }
+  return data.url;
+}
+
+async function resolveZipTemplateAssets(
+  zip: JSZip,
+  template: LayoutTemplate,
+  ticket: string,
+): Promise<LayoutTemplate> {
+  if (!template.pageContents || template.pageContents.length === 0) {
+    return template;
+  }
+
+  // Preload all assets from the ZIP into a lookup map
+  const assetCache = new Map<string, Uint8Array>();
+  const assetsFolder = zip.folder('assets');
+  if (assetsFolder) {
+    const assetFiles: Array<{ name: string; file: JSZip.JSZipObject }> = [];
+    assetsFolder.forEach((relativePath, file) => {
+      if (!file.dir) {
+        assetFiles.push({ name: relativePath, file });
+      }
+    });
+    for (const { name, file } of assetFiles) {
+      assetCache.set(`assets/${name}`, await file.async('uint8array'));
+    }
+  }
+
+  const resolvedContents: Array<[string, PageContent]> = [];
+  for (const [pageId, pageContent] of template.pageContents) {
+    if (pageContent.type === 'canvas') {
+      const content = await restoreExcalidrawAssets(pageContent.content, assetCache, ticket);
+      resolvedContents.push([pageId, { type: 'canvas', content }]);
+    } else if (pageContent.type === 'image' && pageContent.content.startsWith('assets/')) {
+      const assetData = assetCache.get(pageContent.content);
+      if (!assetData) {
+        resolvedContents.push([pageId, pageContent]);
+        continue;
+      }
+      const mime = guessMimeFromFileName(pageContent.content);
+      const blob = new Blob([new Uint8Array(assetData) as BlobPart], { type: mime });
+      const serverUrl = await uploadTemplateAssetToServer(blob, mime, ticket);
+      resolvedContents.push([pageId, { type: 'image', content: serverUrl }]);
+    } else {
+      resolvedContents.push([pageId, pageContent]);
+    }
+  }
+
+  return { ...template, pageContents: resolvedContents };
+}
+
+async function restoreExcalidrawAssets(
+  serialized: string,
+  assetCache: Map<string, Uint8Array>,
+  ticket: string,
+): Promise<string> {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(serialized) as Record<string, unknown>;
+  } catch {
+    return serialized;
+  }
+
+  const files = parsed.files as
+    | Record<string, { id: string; dataURL: string; mimeType?: string }>
+    | undefined;
+  if (!files || typeof files !== 'object') {
+    return serialized;
+  }
+
+  let changed = false;
+  const restoredFiles: Record<string, unknown> = {};
+
+  for (const [fileId, fileData] of Object.entries(files)) {
+    if (!fileData?.dataURL || typeof fileData.dataURL !== 'string') {
+      restoredFiles[fileId] = fileData;
+      continue;
+    }
+
+    const dataUrl = fileData.dataURL;
+    if (dataUrl.startsWith('assets/')) {
+      const assetData = assetCache.get(dataUrl);
+      if (assetData) {
+        const mime = fileData.mimeType || guessMimeFromFileName(dataUrl);
+        restoredFiles[fileId] = { ...fileData, dataURL: uint8ArrayToDataUrl(assetData, mime) };
+        changed = true;
+      } else {
+        restoredFiles[fileId] = fileData;
+      }
+    } else if (dataUrl.startsWith('/uploads/')) {
+      // Server-relative URL — upload to current room
+      const mime = fileData.mimeType || guessMimeFromFileName(dataUrl);
+      try {
+        const resp = await fetch(buildServerApiUrl(dataUrl));
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const serverUrl = await uploadTemplateAssetToServer(blob, mime, ticket);
+          restoredFiles[fileId] = { ...fileData, dataURL: serverUrl };
+          changed = true;
+        } else {
+          restoredFiles[fileId] = fileData;
+        }
+      } catch {
+        restoredFiles[fileId] = fileData;
+      }
+    } else {
+      restoredFiles[fileId] = fileData;
+    }
+  }
+
+  if (!changed) {
+    return serialized;
+  }
+
+  parsed.files = restoredFiles;
+  return JSON.stringify(parsed);
 }

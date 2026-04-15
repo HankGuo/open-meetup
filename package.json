@@ -21,7 +21,12 @@
     "prepare": "husky",
     "lint-staged": "lint-staged",
     "install:all": "npm install && cd server && npm install && cd ../client && npm install",
-    "sim:bulk-join": "node scripts/bulk-join-simulator/simulate-bulk-join.cjs"
+    "sim:bulk-join": "node scripts/bulk-join-simulator/simulate-bulk-join.cjs",
+    "electron:build-deps": "cd server && npm run build && cd ../client && npm run build && cd ../electron && npm run build",
+    "electron:dev": "npm run electron:build-deps && cd electron && npx electron dist/main.js",
+    "electron:build": "npm run electron:build-deps && cd electron && npx electron-builder --config ../electron-builder.config.js",
+    "electron:build:mac": "npm run electron:build-deps && cd electron && npx electron-builder --config ../electron-builder.config.js --mac",
+    "electron:build:win": "npm run electron:build-deps && cd electron && npx electron-builder --config ../electron-builder.config.js --win"
   },
   "lint-staged": {
     "*.{js,cjs,mjs,ts,tsx,css,json,md}": [

@@ -675,6 +675,46 @@ export class RoomManager {
     };
   }
 
+  async uploadTemplateAsset(
+    ticketInput: string,
+    mimeTypeInput: string,
+    bufferInput: Buffer,
+  ): Promise<SocketResult<{ url: string }>> {
+    const room = this.getActiveRoom();
+    if (!room) {
+      return this.fail('房间不存在', 'ROOM_NOT_FOUND');
+    }
+    if (room.status !== 'active') {
+      return this.fail('房间未处于活动状态', 'ROOM_NOT_ACTIVE');
+    }
+    if (room.phase !== 'setup') {
+      return this.fail('仅编排阶段允许上传模板资源', 'BAD_REQUEST');
+    }
+
+    const ticket = normalizeTicket(ticketInput);
+    if (!ticket) {
+      return this.fail('无效的 Ticket', 'INVALID_TICKET');
+    }
+
+    const participant = this.findParticipantByTicket(room, ticket);
+    if (!participant) {
+      return this.fail('无效的 Ticket', 'INVALID_TICKET');
+    }
+    if (participant.role !== 'host') {
+      return this.fail('仅主持人可上传模板资源', 'NOT_AUTHORIZED');
+    }
+
+    const uploadUrl = await persistImageUpload(this.assetStorage, room, mimeTypeInput, bufferInput);
+    if (!uploadUrl) {
+      return this.fail('请上传有效图片后再提交', 'BAD_REQUEST');
+    }
+
+    return {
+      success: true,
+      data: { url: uploadUrl },
+    };
+  }
+
   async revertUpload(
     identity: SocketIdentity,
     uploadUrlInput: string,

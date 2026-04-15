@@ -111,6 +111,57 @@ const roomManager = new RoomManager(undefined, assetStorage);
 registerHandlers(io, roomManager);
 const ticketCheckRateState = new Map<string, { windowStart: number; count: number }>();
 const imageUploadRateState = new Map<string, { windowStart: number; count: number }>();
+const templateAssetRateState = new Map<string, { windowStart: number; count: number }>();
+
+app.post(
+  '/api/uploads/template-asset',
+  express.raw({ type: () => true, limit: IMAGE_UPLOAD_MAX_BYTES }),
+  async (req, res) => {
+    const ticket = resolveTicketHeader(req.headers['x-open-meetup-ticket']);
+    if (!ticket) {
+      res.status(400).json({ error: 'Ticket is required.' });
+      return;
+    }
+
+    const rateLimitKey = `${getTicketCheckRateLimitKey(req)}:${ticket}`;
+    if (
+      isRateLimited(
+        templateAssetRateState,
+        rateLimitKey,
+        IMAGE_UPLOAD_RATE_LIMIT_WINDOW_MS,
+        IMAGE_UPLOAD_RATE_LIMIT_MAX_REQUESTS,
+      )
+    ) {
+      res.status(429).json({ error: 'Too many template asset uploads. Please retry later.' });
+      return;
+    }
+
+    const mimeType = normalizeMimeType(req.headers['content-type']);
+    if (!mimeType.startsWith('image/')) {
+      res.status(400).json({ error: 'Only image upload is supported.' });
+      return;
+    }
+
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (buffer.length === 0) {
+      res.status(400).json({ error: 'Image payload is empty.' });
+      return;
+    }
+
+    try {
+      const result = await roomManager.uploadTemplateAsset(ticket, mimeType, buffer);
+      if (!result.success) {
+        const statusCode = result.error.code === 'NOT_AUTHORIZED' ? 403 : 400;
+        res.status(statusCode).json({ error: result.error.message, code: result.error.code });
+        return;
+      }
+      res.json({ url: result.data.url });
+    } catch (error) {
+      console.error('[HTTP] template asset upload failed', error);
+      res.status(500).json({ error: 'Template asset upload failed.' });
+    }
+  },
+);
 
 app.get('/uploads/:roomId/:fileName', async (req, res) => {
   const roomId = sanitizeUploadRoomId(req.params.roomId);

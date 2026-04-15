@@ -5,6 +5,8 @@ node_modules/
 client/dist/
 server/dist/
 server/uploads/
+electron/dist/
+dist-electron/
 
 # runtime logs and pids
 *.log

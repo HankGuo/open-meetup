@@ -1,0 +1,19 @@
+{
+  "name": "open-meetup-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "clean": "node -e \"require('fs').rmSync('dist',{ recursive: true, force: true })\""
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.1",
+    "electron-builder": "^26.0.12",
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  }
+}
