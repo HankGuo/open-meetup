@@ -299,16 +299,20 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
         try {
           const identity = getAuthorizedSocketIdentity(socket, roomManager);
           if (!identity) {
+            console.error('[Socket] pages:update: NOT_AUTHENTICATED');
             ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
             return;
           }
 
+          console.log(`[Socket] pages:update pageCount=${(payload?.pages ?? []).length}`);
           const result = await roomManager.updatePages(identity, payload?.pages ?? []);
           if (!result.success) {
+            console.error(`[Socket] pages:update FAILED:`, JSON.stringify(result.error));
             ack(callback, result);
             return;
           }
 
+          console.log(`[Socket] pages:update SUCCESS, broadcasting...`);
           broadcastRoomState(io, roomManager);
           ack(callback, result);
         } catch (error) {
@@ -322,11 +326,17 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
       try {
         const identity = getAuthorizedSocketIdentity(socket, roomManager);
         if (!identity) {
+          console.error('[Socket] page:update: NOT_AUTHENTICATED');
           ack(callback, failure('Not authenticated', 'NOT_AUTHENTICATED'));
           return;
         }
 
         const pageId = payload?.pageId ?? '';
+        const contentSize = payload?.content?.content?.length ?? 0;
+        console.log(
+          `[Socket] page:update pageId=${pageId} contentType=${payload?.content?.type} contentSize=${contentSize}`,
+        );
+
         const content = payload.content
           ? {
               type: payload.content.type as 'canvas' | 'image' | 'url' | 'html' | 'markdown',
@@ -336,10 +346,12 @@ export function registerHandlers(io: Server, roomManager: RoomManager) {
 
         const result = roomManager.updatePageContent(identity, pageId, content);
         if (!result.success) {
+          console.error(`[Socket] page:update FAILED:`, JSON.stringify(result.error));
           ack(callback, result);
           return;
         }
 
+        console.log(`[Socket] page:update SUCCESS, broadcasting...`);
         broadcastRoomState(io, roomManager);
         ack(callback, result);
       } catch (error) {

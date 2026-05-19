@@ -6,11 +6,6 @@
 
 - **ZIP 模板导出/导入**：编排模板从 JSON 格式升级为 ZIP 打包格式，导出时自动打包画布内容引用的所有本地图片资源到 `assets/` 目录，导入时自动解压并上传图片到服务端，确保模板跨会话完整复用
 - **模板图片上传接口**：新增 `POST /api/uploads/template-asset` 接口，支持主持人在 setup 阶段上传模板关联图片
-- **Electron 桌面应用封装**：支持 Win/Mac 双击安装使用，内置 Node.js 服务，无需任何开发环境
-  - 首次启动配置窗口（端口、密码、房间名）
-  - 系统托盘显示状态与局域网 IP
-  - 自动启动内置 HTTP 服务，参与者扫码或输入地址即可加入
-  - 支持 `electron-builder` 打包为 .dmg (macOS) 和 .exe (Windows)
 
 ### Breaking Changes
 

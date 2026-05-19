@@ -16,7 +16,7 @@ import { createAssetStorage } from './assetStorage';
 const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 const SOCKET_MAX_HTTP_BUFFER_SIZE_BYTES = 25 * 1024 * 1024;
-const IMAGE_UPLOAD_MAX_BYTES = 2_000_000;
+const IMAGE_UPLOAD_MAX_BYTES = 4_000_000;
 const TICKET_CHECK_RATE_LIMIT_WINDOW_MS = 60_000;
 const TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS = parseRateLimitMaxRequests(
   process.env.TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS,
@@ -247,8 +247,8 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// Electron 模式：通过 CLIENT_DIST_PATH 环境变量直接托管前端静态文件
-// 非 Electron 模式（开发）：前端由 Vite dev server 独立提供
+// 生产模式：通过 CLIENT_DIST_PATH 环境变量直接托管前端静态文件
+// 开发模式：前端由 Vite dev server 独立提供
 const CLIENT_DIST_PATH = process.env.CLIENT_DIST_PATH;
 if (CLIENT_DIST_PATH) {
   const resolvedClientPath = path.resolve(CLIENT_DIST_PATH);

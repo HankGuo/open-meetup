@@ -10,7 +10,6 @@ Open Meetup 是一个面向线下活动（工作坊、培训、分享会）的 *
 - [功能总览](#功能总览)
 - [系统约束与边界](#系统约束与边界)
 - [架构与运行模型](#架构与运行模型)
-- [Electron 桌面应用](#electron-桌面应用)
 - [快速开始](#快速开始)
 - [环境变量](#环境变量)
 - [常用命令](#常用命令)
@@ -92,49 +91,7 @@ Open Meetup 是一个面向线下活动（工作坊、培训、分享会）的 *
 4. 参与者按当前互动页提交内容
 5. 主持人翻页/回编排/结束房间
 
-## Electron 桌面应用
-
-如果你不需要修改代码，推荐直接使用桌面应用——双击安装即可运行，无需安装 Node.js 或任何开发环境。
-
-### 功能特点
-
-- **零环境依赖**：打包后包含完整的前后端，开箱即用
-- **配置窗口**：首次启动弹出设置界面，填写端口、主持人密码、房间名称后一键启动
-- **局域网直连**：参与者在同一网络下用浏览器访问显示的 IP 地址即可加入
-- **系统托盘**：启动后常驻托盘，显示局域网地址，可随时打开主窗口或退出
-
-### 安装方式
-
-从 [Releases](https://github.com/anthropics/open-meetup/releases) 下载对应平台的安装包：
-
-- macOS：`.dmg`
-- Windows：`.exe`（NSIS 安装包）
-
-如需自行打包：
-
-```bash
-# macOS
-npm run electron:build:mac
-
-# Windows
-npm run electron:build:win
-```
-
-打包产物在 `dist-electron/` 目录。
-
-### 使用流程
-
-1. 打开 Open Meetup 应用
-2. 在配置窗口填写端口、主持人密码和房间名称，点击「启动服务」
-3. 应用自动启动后端并打开主界面
-4. 将托盘或界面中显示的局域网地址（如 `http://192.168.x.x:4001`）发给参与者
-5. 参与者用浏览器打开该地址即可加入
-
-> 配置会自动保存，下次启动时直接使用上次的设置。
-
 ## 快速开始
-
-> 如果你不是开发者，推荐直接使用 [Electron 桌面应用](#electron-桌面应用)。
 
 ### 环境要求
 
@@ -306,10 +263,8 @@ npm test
 open-meetup/
 ├── client/                         # React 前端
 ├── server/                         # Express + Socket.IO 后端
-├── electron/                       # Electron 桌面应用（主进程、配置窗口、托盘）
 ├── scripts/                        # 启停/日志/模拟脚本
 ├── docs/                           # API 与开发文档
-├── electron-builder.config.js      # Electron 打包配置
 ├── .env.example
 ├── README.md
 └── README.zh-CN.md
