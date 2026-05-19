@@ -283,7 +283,7 @@ npm test
 - 检查请求头 `X-Open-Meetup-Ticket`
 - 检查请求头 `X-Open-Meetup-Page-Id`
 - 检查 `content-type` 是否为 `image/*`
-- 检查图片大小（前端限制 1.5MB，后端限制 2MB）
+- 检查图片大小（前后端限制均为 4MB）
 
 ## 项目结构
 
