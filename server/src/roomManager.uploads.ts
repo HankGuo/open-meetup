@@ -10,7 +10,7 @@ import {
   UPLOAD_URL_PREFIX,
 } from './roomManager.validation';
 
-export const MAX_IMAGE_UPLOAD_BYTES = 2_000_000;
+export const MAX_IMAGE_UPLOAD_BYTES = 4_000_000;
 
 export async function persistImageUpload(
   assetStorage: AssetStorage,

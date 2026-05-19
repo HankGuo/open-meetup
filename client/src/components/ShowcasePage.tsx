@@ -15,7 +15,7 @@ import { useMeeting } from '../context/MeetingContext';
 import { ParticipantWorkSubmission, User } from '../types';
 import { buildServerApiUrl } from '../serverUrl';
 
-const MAX_IMAGE_FILE_SIZE_BYTES = 1_500_000;
+const MAX_IMAGE_FILE_SIZE_BYTES = 4_000_000;
 
 export function ShowcasePage() {
   const {
@@ -117,7 +117,7 @@ export function ShowcasePage() {
       return;
     }
     if (file.size > MAX_IMAGE_FILE_SIZE_BYTES) {
-      setSubmitError('图片体积不能超过 1.5MB');
+      setSubmitError(`图片体积不能超过 4MB，当前 ${(file.size / 1024 / 1024).toFixed(1)}MB，请压缩后重试`);
       return;
     }
 
@@ -270,7 +270,7 @@ export function ShowcasePage() {
                   <div className="mt-2 flex items-center gap-3">
                     <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)]">
                       {localImagePreview ? (
-                        <img src={localImagePreview} alt="preview" className="h-full w-full object-cover" />
+                        <img src={localImagePreview} alt="preview" className="h-full w-full object-contain" />
                       ) : (
                         <ImageIcon className="h-6 w-6 text-[var(--text-soft)]" />
                       )}
@@ -389,12 +389,12 @@ export function ShowcasePage() {
                       className="showcase-work-card showcase-work-card--submitted group relative overflow-hidden rounded-2xl border text-left transition hover:-translate-y-0.5"
                     >
                       {rankingEnabled && rank <= 3 ? <RankCrown rank={rank as 1 | 2 | 3} /> : null}
-                      <div className="showcase-work-thumb relative h-36">
+                      <div className="showcase-work-thumb relative flex h-36 items-center justify-center bg-[var(--panel-soft)]">
                         {isImageUrl(submission.url) ? (
                           <img
                             src={submission.url}
                             alt={participant.userName}
-                            className="h-full w-full object-cover"
+                            className="h-full w-full object-contain"
                           />
                         ) : (
                           <iframe

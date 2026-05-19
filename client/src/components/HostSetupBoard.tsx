@@ -232,7 +232,7 @@ export function HostSetupBoard({
       for (const entry of templateData.pageContents ?? []) {
         const [pageId, pageContent] = entry;
         if (pageContent.type === 'canvas') {
-          const { content: rewritten, extractedAssets } = extractExcalidrawAssets(pageContent.content);
+          const { content: rewritten, extractedAssets } = await extractExcalidrawAssets(pageContent.content);
           for (const asset of extractedAssets) {
             assetsFolder.file(asset.fileName, asset.data);
           }
@@ -849,10 +849,10 @@ interface ExtractedAsset {
   data: Uint8Array;
 }
 
-function extractExcalidrawAssets(serialized: string): {
+async function extractExcalidrawAssets(serialized: string): Promise<{
   content: string;
   extractedAssets: ExtractedAsset[];
-} {
+}> {
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(serialized) as Record<string, unknown>;
@@ -876,16 +876,30 @@ function extractExcalidrawAssets(serialized: string): {
       continue;
     }
     const dataUrl = fileData.dataURL;
-    const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/);
-    if (!match) {
+    const inlineAsset = extractInlineAsset(dataUrl);
+    if (inlineAsset) {
+      const mime = inlineAsset.mimeType || fileData.mimeType || 'application/octet-stream';
+      const fileName = `exc-${fileId}${mimeToExtension(mime)}`;
+      assets.push({ fileName, data: inlineAsset.data });
+      rewrittenFiles[fileId] = { ...fileData, dataURL: `assets/${fileName}` };
+      continue;
+    }
+
+    if (!dataUrl.startsWith('/uploads/')) {
       rewrittenFiles[fileId] = fileData;
       continue;
     }
-    const mime = match[1] || 'application/octet-stream';
-    const base64 = match[2];
-    const ext = mimeToExtension(mime);
-    const fileName = `exc-${fileId}${ext}`;
-    const binary = base64ToUint8Array(base64);
+
+    const response = await fetch(buildServerApiUrl(dataUrl));
+    if (!response.ok) {
+      throw new Error(`Failed to read canvas asset: ${response.status}`);
+    }
+    const mime =
+      fileData.mimeType ||
+      normalizeResponseMimeType(response.headers.get('content-type')) ||
+      guessMimeFromFileName(dataUrl);
+    const binary = new Uint8Array(await response.arrayBuffer());
+    const fileName = `exc-${fileId}${mimeToExtension(mime) || extensionFromPath(dataUrl)}`;
     assets.push({ fileName, data: binary });
     rewrittenFiles[fileId] = { ...fileData, dataURL: `assets/${fileName}` };
   }
@@ -989,7 +1003,7 @@ async function resolveZipTemplateAssets(
   const resolvedContents: Array<[string, PageContent]> = [];
   for (const [pageId, pageContent] of template.pageContents) {
     if (pageContent.type === 'canvas') {
-      const content = await restoreExcalidrawAssets(pageContent.content, assetCache, ticket);
+      const content = await restoreExcalidrawAssets(pageContent.content, assetCache);
       resolvedContents.push([pageId, { type: 'canvas', content }]);
     } else if (pageContent.type === 'image' && pageContent.content.startsWith('assets/')) {
       const assetData = assetCache.get(pageContent.content);
@@ -1012,7 +1026,6 @@ async function resolveZipTemplateAssets(
 async function restoreExcalidrawAssets(
   serialized: string,
   assetCache: Map<string, Uint8Array>,
-  ticket: string,
 ): Promise<string> {
   let parsed: Record<string, unknown>;
   try {
@@ -1048,14 +1061,12 @@ async function restoreExcalidrawAssets(
         restoredFiles[fileId] = fileData;
       }
     } else if (dataUrl.startsWith('/uploads/')) {
-      // Server-relative URL — upload to current room
       const mime = fileData.mimeType || guessMimeFromFileName(dataUrl);
       try {
         const resp = await fetch(buildServerApiUrl(dataUrl));
         if (resp.ok) {
-          const blob = await resp.blob();
-          const serverUrl = await uploadTemplateAssetToServer(blob, mime, ticket);
-          restoredFiles[fileId] = { ...fileData, dataURL: serverUrl };
+          const assetData = new Uint8Array(await resp.arrayBuffer());
+          restoredFiles[fileId] = { ...fileData, dataURL: uint8ArrayToDataUrl(assetData, mime) };
           changed = true;
         } else {
           restoredFiles[fileId] = fileData;
@@ -1074,4 +1085,22 @@ async function restoreExcalidrawAssets(
 
   parsed.files = restoredFiles;
   return JSON.stringify(parsed);
+}
+
+function extractInlineAsset(dataUrl: string): { mimeType: string; data: Uint8Array } | null {
+  const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    mimeType: match[1] || 'application/octet-stream',
+    data: base64ToUint8Array(match[2]),
+  };
+}
+
+function normalizeResponseMimeType(value: string | null): string {
+  if (!value) {
+    return '';
+  }
+  return value.split(';', 1)[0]?.trim().toLowerCase() ?? '';
 }
