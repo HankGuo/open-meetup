@@ -45,15 +45,33 @@ Response (room exists):
 }
 ```
 
-### `GET /api/room/ticket-check?ticket=...`
+### `POST /api/room/ticket-check`
 
-Checks whether a ticket is currently valid.
+Checks whether a ticket is currently valid. Uses POST so the ticket never
+appears in access logs or proxy logs.
+
+Request body:
+
+```json
+{
+  "ticket": "TKT-XXXXXXXXXXXX"
+}
+```
 
 Response:
 
 ```json
 {
   "valid": true
+}
+```
+
+Rate limited (per IP, NAT-friendly default 300/min):
+
+```json
+{
+  "valid": false,
+  "error": "Too many requests. Please retry later."
 }
 ```
 
@@ -83,10 +101,18 @@ Response:
 }
 ```
 
+### `POST /api/uploads/template-asset`
+
+Host-only asset upload for layout templates (setup phase, host ticket required).
+Same headers/contract as `POST /api/uploads/image` minus the page id header.
+
 ### `GET /uploads/:roomId/:fileName`
 
 Read-only uploaded asset endpoint.  
-Both `roomId` and `fileName` are strictly sanitized.
+Both `roomId` and `fileName` are strictly sanitized. Responses always carry
+`Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`;
+SVG files are served as `Content-Disposition: attachment` (and are rejected
+on upload unless `ALLOW_SVG_UPLOAD=1`).
 
 ---
 
@@ -96,22 +122,30 @@ All responses use:
 
 ```ts
 type SocketResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: { message: string; code: string } };
+  { success: true; data: T } | { success: false; error: { message: string; code: string } };
 ```
 
 ### Room lifecycle
 
 - `room:create` payload: `{ userName, title, password, participantLimit? }`
+  - Wrong passwords are rate-limited per IP (`RATE_LIMITED` after repeated failures).
 - `room:join` payload: `{ userName, ticket? }`
+  - Duplicate nicknames are rejected; a ticket already bound to a live socket
+    is rejected with `SESSION_ACTIVE` (prevents silent ghost-tab takeover).
 - `room:reconnect` payload: `{ userId, sessionId }`
 - `room:leave` payload: `{}`
 - `room:end` payload: `{}`
+- `room:kick` payload: `{ userId }` — host only; disconnects the target and
+  cleans up their submissions/uploads.
 
 Server push:
 
-- `state:sync` full room state snapshot
-- `room:closed` payload: `{ reason }`
+- `state:sync` room state snapshot (participants/phase/step/pages — no page contents)
+- `content:update` payload: `{ entries: Array<[pageId, PageContent | null]> }` — content delta
+- `content:reset` payload: `{ pageContents }` — full content reset after structural page changes
+- `room:closed` payload: `{ reason }` — including `SERVER_SHUTDOWN` on graceful shutdown
+- `room:kicked` — sent to a participant removed by the host
+- `rate:limited` payload: `{ windowMs }` — the connection exceeded the event rate limit
 
 ### Host controls
 
@@ -136,6 +170,11 @@ Server push:
 ## 3. Security Constraints
 
 - Ticket is required for image upload and is always verified server-side.
+- Uploads are validated by magic bytes, not by the Content-Type header; SVG is rejected by default.
 - Uploaded file path segments must pass strict whitelist validation.
 - Storage layer also verifies resolved paths stay inside upload root.
+- Per-room asset quota and per-page content size limits are enforced server-side.
+- Socket connections are rate limited per connection; host password attempts are
+  locked out per IP after repeated failures; password comparison is constant-time.
 - Invalid ticket/session always returns authentication/authorization errors.
+- A ticket bound to a live connection cannot be hijacked by a second connection.

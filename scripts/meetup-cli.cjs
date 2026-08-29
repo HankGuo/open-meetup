@@ -5,6 +5,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -12,7 +13,10 @@ const PID_FILE = path.join(ROOT_DIR, '.open-meetup.pid');
 const LOG_DIR = path.join(ROOT_DIR, '.logs');
 const SERVER_LOG_FILE = path.join(LOG_DIR, 'server.log');
 const CLIENT_LOG_FILE = path.join(LOG_DIR, 'client.log');
-const SERVER_PORT = '3001';
+const SERVER_DIR = path.join(ROOT_DIR, 'server');
+const CLIENT_DIR = path.join(ROOT_DIR, 'client');
+const SERVER_DIST_ENTRY = path.join(SERVER_DIR, 'dist', 'index.js');
+const CLIENT_DIST_DIR = path.join(CLIENT_DIR, 'dist');
 
 const NPM_CMD = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
@@ -23,19 +27,22 @@ function printHelp() {
   node scripts/meetup-cli.cjs <命令> [选项]
 
 命令:
-  start                  启动服务
+  start                  启动服务（默认生产模式：自动构建 + 单端口静态托管）
   stop                   停止服务
   logs                   查看并持续跟踪日志
   help                   显示帮助
 
 start 选项:
-  --host-password <pwd>  主持人口令（默认: 12345678）
+  --host-password <pwd>  主持人口令（不传则自动生成强口令并在启动后展示）
   --port <port>          访问端口（默认: 8080）
+  --dev                  开发者模式：ts-node-dev + Vite dev server（不构建，热更新）
+  --force-build          生产模式下忽略已有构建产物，强制重新构建
   -h, --help             显示帮助
 
 示例:
   npm start
-  npm start -- --host-password 12345678 --port 8080
+  npm start -- --host-password my-secret --port 8080
+  npm start -- --dev
   npm stop
   npm run logs
 `);
@@ -43,8 +50,10 @@ start 选项:
 
 function parseStartOptions(argv) {
   const options = {
-    hostPassword: (process.env.HOST_PASSWORD || '12345678').trim(),
+    hostPassword: (process.env.HOST_PASSWORD || '').trim(),
     clientPort: (process.env.LAN_PORT || '8080').trim(),
+    devMode: false,
+    forceBuild: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -59,6 +68,14 @@ function parseStartOptions(argv) {
       i += 1;
       continue;
     }
+    if (arg === '--dev') {
+      options.devMode = true;
+      continue;
+    }
+    if (arg === '--force-build') {
+      options.forceBuild = true;
+      continue;
+    }
     if (arg === '-h' || arg === '--help') {
       printHelp();
       process.exit(0);
@@ -66,8 +83,11 @@ function parseStartOptions(argv) {
     throw new Error(`未知参数: ${arg}`);
   }
 
-  if (!options.hostPassword) {
-    throw new Error('主持人口令不能为空，可用 --host-password 指定');
+  if (!options.devMode && options.hostPassword && options.hostPassword.length < 6) {
+    throw new Error('主持人口令至少 6 位，建议 8 位以上且不要使用 12345678 等常见口令');
+  }
+  if (!options.devMode && options.hostPassword === '12345678') {
+    console.warn('⚠️  警告：正在使用弱口令 12345678，局域网内任何人都可以创建并控制房间。');
   }
   if (!isValidPort(options.clientPort)) {
     throw new Error(`访问端口无效: ${options.clientPort}`);
@@ -93,6 +113,17 @@ function isProcessAlive(pid) {
   }
 }
 
+function generatePassword() {
+  // 去掉易混淆字符的 8 位强口令
+  const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+  const bytes = crypto.randomBytes(8);
+  let out = '';
+  for (const byte of bytes) {
+    out += alphabet[byte % alphabet.length];
+  }
+  return out;
+}
+
 function ensureDependencies() {
   const ready = fs.existsSync(path.join(ROOT_DIR, 'node_modules'));
   if (ready) {
@@ -110,6 +141,18 @@ function ensureDependencies() {
   }
 }
 
+function buildProd() {
+  console.log('正在构建生产包（首次启动或代码更新后需要一次）...');
+  const result = spawnSync(NPM_CMD, ['run', 'build'], {
+    cwd: ROOT_DIR,
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (result.status !== 0) {
+    throw new Error('构建失败，请检查上方错误信息');
+  }
+}
+
 function runDetachedNpm(cwd, args, env, logFile) {
   const outFd = fs.openSync(logFile, 'a');
   const child = spawn(NPM_CMD, args, {
@@ -124,7 +167,21 @@ function runDetachedNpm(cwd, args, env, logFile) {
   return child.pid;
 }
 
-function killByPid(pid, name) {
+function runDetachedNode(entryPath, env, logFile) {
+  const outFd = fs.openSync(logFile, 'a');
+  const child = spawn(process.execPath, [entryPath], {
+    cwd: ROOT_DIR,
+    env: { ...process.env, ...env },
+    detached: true,
+    stdio: ['ignore', outFd, outFd],
+    windowsHide: true,
+  });
+  child.unref();
+  fs.closeSync(outFd);
+  return child.pid;
+}
+
+async function killByPid(pid, name) {
   if (!pid || typeof pid !== 'number') {
     return;
   }
@@ -137,13 +194,28 @@ function killByPid(pid, name) {
     return;
   }
 
+  // 先 SIGTERM 让服务端有机会广播 room:closed 并清理，超时再强杀
   try {
-    process.kill(-pid, 'SIGKILL');
+    process.kill(-pid, 'SIGTERM');
   } catch (_) {
     try {
-      process.kill(pid, 'SIGKILL');
+      process.kill(pid, 'SIGTERM');
     } catch (__) {
       return;
+    }
+  }
+
+  const deadline = Date.now() + 4000;
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await wait(100);
+  }
+  if (isProcessAlive(pid)) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch (_) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (__) {}
     }
   }
   console.log(`已停止 ${name} 进程 (${pid})`);
@@ -184,8 +256,10 @@ async function stopCommand({ silent = false } = {}) {
     console.log('正在停止 Open Meetup...');
   }
 
-  killByPid(Number(state.serverPid), 'server');
-  killByPid(Number(state.clientPid), 'client');
+  await killByPid(Number(state.serverPid), 'server');
+  if (state.clientPid) {
+    await killByPid(Number(state.clientPid), 'client');
+  }
   removePidState();
 
   if (!silent) {
@@ -242,8 +316,63 @@ function wait(ms) {
   });
 }
 
-async function startCommand(argv) {
-  const options = parseStartOptions(argv);
+async function startProdCommand(options) {
+  ensureDependencies();
+
+  const needBuild =
+    options.forceBuild ||
+    !fs.existsSync(SERVER_DIST_ENTRY) ||
+    !fs.existsSync(path.join(CLIENT_DIST_DIR, 'index.html'));
+  if (needBuild) {
+    buildProd();
+  }
+
+  await stopCommand({ silent: true });
+
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+  fs.writeFileSync(SERVER_LOG_FILE, '', 'utf8');
+
+  const hostPassword = options.hostPassword || generatePassword();
+  const serverPid = runDetachedNode(
+    SERVER_DIST_ENTRY,
+    {
+      NODE_ENV: 'production',
+      HOST: '0.0.0.0',
+      PORT: options.clientPort,
+      HOST_PASSWORD: hostPassword,
+      CLIENT_DIST_PATH: CLIENT_DIST_DIR,
+    },
+    SERVER_LOG_FILE,
+  );
+
+  await wait(1200);
+  if (!isProcessAlive(serverPid)) {
+    await killByPid(serverPid, 'server');
+    throw new Error('启动失败，请执行 npm run logs 查看日志');
+  }
+
+  writePidState({
+    startedAt: new Date().toISOString(),
+    mode: 'production',
+    serverPid,
+    clientPort: Number(options.clientPort),
+  });
+
+  const lanIp = getLanIp();
+  const shareUrl = `http://${lanIp}:${options.clientPort}`;
+
+  console.log('Open Meetup 已启动（生产模式，单端口）。');
+  console.log(`访问地址: ${shareUrl}`);
+  console.log(`主持人口令: ${hostPassword}`);
+  console.log('查看日志: npm run logs');
+  console.log('停止服务: npm stop');
+
+  if (tryCopyToClipboard(shareUrl)) {
+    console.log('访问地址已复制到剪贴板。');
+  }
+}
+
+async function startDevCommand(options) {
   ensureDependencies();
 
   await stopCommand({ silent: true });
@@ -252,19 +381,20 @@ async function startCommand(argv) {
   fs.writeFileSync(SERVER_LOG_FILE, '', 'utf8');
   fs.writeFileSync(CLIENT_LOG_FILE, '', 'utf8');
 
+  const hostPassword = options.hostPassword || '12345678';
   const serverPid = runDetachedNpm(
-    path.join(ROOT_DIR, 'server'),
+    SERVER_DIR,
     ['run', 'dev'],
     {
       HOST: '0.0.0.0',
-      PORT: SERVER_PORT,
-      HOST_PASSWORD: options.hostPassword,
+      PORT: '3001',
+      HOST_PASSWORD: hostPassword,
     },
     SERVER_LOG_FILE,
   );
 
   const clientPid = runDetachedNpm(
-    path.join(ROOT_DIR, 'client'),
+    CLIENT_DIR,
     ['run', 'dev', '--', '--host', '0.0.0.0', '--port', options.clientPort],
     {},
     CLIENT_LOG_FILE,
@@ -275,13 +405,14 @@ async function startCommand(argv) {
   const serverAlive = isProcessAlive(serverPid);
   const clientAlive = isProcessAlive(clientPid);
   if (!serverAlive || !clientAlive) {
-    killByPid(serverPid, 'server');
-    killByPid(clientPid, 'client');
+    await killByPid(serverPid, 'server');
+    await killByPid(clientPid, 'client');
     throw new Error('启动失败，请执行 npm run logs 查看日志');
   }
 
   writePidState({
     startedAt: new Date().toISOString(),
+    mode: 'dev',
     serverPid,
     clientPid,
     clientPort: Number(options.clientPort),
@@ -290,9 +421,9 @@ async function startCommand(argv) {
   const lanIp = getLanIp();
   const shareUrl = `http://${lanIp}:${options.clientPort}`;
 
-  console.log('Open Meetup 已启动。');
+  console.log('Open Meetup 已启动（开发者模式，Vite dev server）。');
   console.log(`访问地址: ${shareUrl}`);
-  console.log(`主持人口令: ${options.hostPassword}`);
+  console.log(`主持人口令: ${hostPassword}`);
   console.log('查看日志: npm run logs');
   console.log('停止服务: npm stop');
 
@@ -371,7 +502,12 @@ async function main() {
     return;
   }
   if (command === 'start') {
-    await startCommand(args);
+    const options = parseStartOptions(args);
+    if (options.devMode) {
+      await startDevCommand(options);
+    } else {
+      await startProdCommand(options);
+    }
     return;
   }
   if (command === 'stop') {

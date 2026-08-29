@@ -9,11 +9,8 @@ export function getServerBaseUrl(): string {
   }
 
   if (typeof window !== 'undefined') {
-    if (import.meta.env.DEV) {
-      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const host = window.location.hostname || 'localhost';
-      return `${protocol}//${host}:3001`;
-    }
+    // 开发模式经 Vite 代理转发到服务端，保持与生产同源行为一致；
+    // 需要直连时可用 VITE_SERVER_URL 覆盖
     return trimTrailingSlash(window.location.origin);
   }
 

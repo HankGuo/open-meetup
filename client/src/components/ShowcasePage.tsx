@@ -122,8 +122,8 @@ export function ShowcasePage() {
     }
 
     const mimeType = file.type.trim().toLowerCase();
-    if (!mimeType.startsWith('image/')) {
-      setSubmitError('仅支持图片文件');
+    if (!mimeType.startsWith('image/') || mimeType === 'image/svg+xml') {
+      setSubmitError('仅支持 PNG / JPEG / WebP / GIF 等图片文件');
       return;
     }
 
@@ -278,7 +278,7 @@ export function ShowcasePage() {
                     <label className="min-w-0 flex-1">
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif"
                         onChange={handleImageChange}
                         className="hidden"
                         disabled={!canSubmit}

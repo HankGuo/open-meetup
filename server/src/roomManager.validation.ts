@@ -10,6 +10,8 @@ import {
 } from './types';
 import {
   DEFAULT_PARTICIPANTS_PER_ROOM,
+  MAX_PAGE_CONTENT_CANVAS_BYTES,
+  MAX_PAGE_CONTENT_TEXT_BYTES,
   ROOM_PARTICIPANT_LIMIT_MAX,
   ROOM_PARTICIPANT_LIMIT_MIN,
 } from './config';
@@ -21,18 +23,43 @@ const MAX_WORK_DESCRIPTION_LENGTH = 120;
 const MAX_PAGE_TITLE_LENGTH = 64;
 export const UPLOAD_URL_PREFIX = '/uploads';
 
+/** 控制字符混入昵称/标题会影响展示与日志，直接剔除 */
+const CONTROL_CHARS = new Set(
+  Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).concat(['\u007F']),
+);
+
+function stripControlChars(value: string): string {
+  return Array.from(value)
+    .filter((char) => !CONTROL_CHARS.has(char))
+    .join('');
+}
+
 export function sanitizeUserName(userName: string): string {
   if (typeof userName !== 'string') {
     return '';
   }
-  return userName.trim().slice(0, 32);
+  return stripControlChars(userName).trim().slice(0, 32);
 }
 
 export function sanitizeTitle(title: string): string {
   if (typeof title !== 'string') {
     return '';
   }
-  return title.trim().slice(0, 64);
+  return stripControlChars(title).trim().slice(0, 64);
+}
+
+/** 昵称重复会让主持人与其他参与者无法辨识提交者，直接拒绝 */
+export function isUserNameTaken(room: Room, userName: string): boolean {
+  const normalized = userName.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  for (const participant of room.participants.values()) {
+    if (participant.userName.trim().toLowerCase() === normalized) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function sanitizeParticipantLimit(value: unknown): number | null {
@@ -85,7 +112,20 @@ function sanitizePageTitle(value: unknown): string {
   if (typeof value !== 'string') {
     return '';
   }
-  return value.trim().slice(0, MAX_PAGE_TITLE_LENGTH);
+  return stripControlChars(value).trim().slice(0, MAX_PAGE_TITLE_LENGTH);
+}
+
+/** 单页内容按类型限制字节量，防止画布/文本内容把内存与广播带宽打爆 */
+export function isPageContentSizeValid(content: PageContent): boolean {
+  const byteLength = Buffer.byteLength(content.content, 'utf8');
+  if (content.type === 'canvas') {
+    return byteLength <= MAX_PAGE_CONTENT_CANVAS_BYTES;
+  }
+  return byteLength <= MAX_PAGE_CONTENT_TEXT_BYTES;
+}
+
+export function isPageContentTypeValid(type: unknown): type is PageContent['type'] {
+  return type === 'canvas' || type === 'image' || type === 'url' || type === 'html' || type === 'markdown';
 }
 
 export function sanitizePagesInput(value: unknown): MeetingPageDefinition[] | null {
@@ -208,30 +248,18 @@ function sanitizePageContent(value: unknown): PageContent | null {
     return null;
   }
   const rawContent = value as Record<string, unknown>;
-  const type = sanitizePageContentType(rawContent.type);
-  if (!type) {
+  const type = rawContent.type;
+  if (!isPageContentTypeValid(type)) {
     return null;
   }
   if (typeof rawContent.content !== 'string') {
     return null;
   }
-  return {
-    type,
-    content: rawContent.content,
-  };
-}
-
-function sanitizePageContentType(value: unknown): PageContent['type'] | null {
-  if (
-    value === 'canvas' ||
-    value === 'image' ||
-    value === 'url' ||
-    value === 'html' ||
-    value === 'markdown'
-  ) {
-    return value;
+  const content: PageContent = { type, content: rawContent.content };
+  if (!isPageContentSizeValid(content)) {
+    return null;
   }
-  return null;
+  return content;
 }
 
 function sanitizePageSubmissionMode(value: unknown): PageSubmissionMode | null {
@@ -362,6 +390,71 @@ export function normalizeImageMimeType(input: string): string {
     return '';
   }
   return input.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+}
+
+export type SniffedImageMime =
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/gif'
+  | 'image/webp'
+  | 'image/avif'
+  | 'image/bmp'
+  | 'image/svg+xml'
+  | null;
+
+/**
+ * 按文件头魔数识别图片真实类型，不信任 Content-Type 头。
+ * 识别不出（含伪装成图片的其他数据）时返回 null。
+ */
+export function sniffImageMimeFromBuffer(buffer: Buffer): SniffedImageMime {
+  // 最短的合法图片头是 GIF（6 字节）；更短的数据不可能构成任何受支持格式
+  if (!Buffer.isBuffer(buffer) || buffer.length < 6) {
+    return null;
+  }
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  // GIF: GIF87a / GIF89a
+  if (buffer.slice(0, 3).toString('ascii') === 'GIF') {
+    return 'image/gif';
+  }
+  // WEBP: RIFF....WEBP
+  if (buffer.slice(0, 4).toString('ascii') === 'RIFF' && buffer.slice(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp';
+  }
+  // AVIF / HEIC 家族：ftyp 盒
+  if (buffer.slice(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buffer.slice(8, 12).toString('ascii');
+    if (brand.startsWith('avi')) {
+      return 'image/avif';
+    }
+    return null;
+  }
+  // BMP: 42 4D
+  if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
+    return 'image/bmp';
+  }
+  // SVG：XML 声明或 <svg 标签（允许前置空白）
+  const head = buffer.slice(0, Math.min(buffer.length, 256)).toString('utf8').trimStart().toLowerCase();
+  if (head.startsWith('<?xml') || head.startsWith('<svg')) {
+    return 'image/svg+xml';
+  }
+  return null;
 }
 
 export function sanitizeWorkDescription(input: string): string {

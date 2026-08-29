@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Crown, Users, X } from 'lucide-react';
+import { ChevronDown, Crown, UserMinus, Users, X } from 'lucide-react';
 import { useMeeting } from '../context/MeetingContext';
 import { User } from '../types';
+import type { User as UserType } from '../types';
 
 const INLINE_PREVIEW_LIMIT = 4;
 const MENU_LIMIT = 10;
@@ -12,9 +13,29 @@ interface ParticipantRosterBarProps {
 }
 
 export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) {
-  const { participants, hostId, myUserId } = useMeeting();
+  const { participants, hostId, myUserId, myRole, kickParticipant } = useMeeting();
   const [showMenu, setShowMenu] = useState(false);
   const [showFullList, setShowFullList] = useState(false);
+  const [kickingId, setKickingId] = useState<string | null>(null);
+  const isHostRole = myRole === 'host';
+
+  async function handleKick(participant: UserType) {
+    if (kickingId) {
+      return;
+    }
+    if (
+      !window.confirm(`确定将「${participant.userName}」移出房间？其提交的内容会一并清理，对方可重新加入。`)
+    ) {
+      return;
+    }
+    setKickingId(participant.userId);
+    const success = await kickParticipant(participant.userId);
+    setKickingId(null);
+    if (success) {
+      setShowFullList(false);
+      setShowMenu(false);
+    }
+  }
   const menuRootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -133,6 +154,7 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                     {menuMembers.map((participant, index) => {
                       const isHost = participant.userId === hostId;
                       const isMe = participant.userId === myUserId;
+                      const canKick = isHostRole && !isHost && !isMe;
                       return (
                         <div
                           key={participant.userId}
@@ -154,6 +176,18 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                               <span>{isHost ? '主持人' : isMe ? '我' : '参与者'}</span>
                             </div>
                           </div>
+                          {canKick ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleKick(participant)}
+                              disabled={kickingId === participant.userId}
+                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--text-soft)] transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                              aria-label={`移出 ${participant.userName}`}
+                              title="移出房间"
+                            >
+                              <UserMinus className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -204,6 +238,7 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
               {sortedParticipants.map((participant, index) => {
                 const isHost = participant.userId === hostId;
                 const isMe = participant.userId === myUserId;
+                const canKick = isHostRole && !isHost && !isMe;
 
                 return (
                   <div
@@ -231,6 +266,17 @@ export function ParticipantRosterBar({ topActions }: ParticipantRosterBarProps) 
                         ) : null}
                       </div>
                     </div>
+                    {canKick ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleKick(participant)}
+                        disabled={kickingId === participant.userId}
+                        className="btn-base btn-secondary h-8 shrink-0 rounded-md px-2 text-xs text-rose-600 hover:border-rose-300 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        <UserMinus className="h-3.5 w-3.5" />
+                        移出
+                      </button>
+                    ) : null}
                   </div>
                 );
               })}

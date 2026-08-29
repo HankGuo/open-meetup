@@ -138,7 +138,13 @@ npm run install:all
 npm start
 ```
 
-启动后会输出局域网访问地址（例如 `http://192.168.x.x:8080`），并尝试自动复制到剪贴板。
+`npm start` 默认以**生产模式**运行：自动构建（首次或代码更新后）→ 单进程单端口托管前端与服务端。启动后会输出局域网访问地址（例如 `http://192.168.x.x:8080`）并尝试复制到剪贴板；若未通过 `--host-password` 指定口令，会自动生成强口令并打印在终端。
+
+开发者模式（Vite 热更新 + ts-node-dev，仅限本机调试，不要用于现场活动）：
+
+```bash
+npm start -- --dev
+```
 
 ### 停止与日志
 
@@ -150,39 +156,54 @@ npm run logs
 ### 可选启动参数
 
 ```bash
-npm start -- --host-password <口令> --port <前端端口>
+npm start -- --host-password <口令> --port <访问端口> [--force-build] [--dev]
 ```
+
+- `--host-password`：主持人口令，至少 6 位；不传则自动生成
+- `--port`：访问端口（默认 8080，生产模式下同时是服务端端口）
+- `--force-build`：忽略已有构建产物强制重新构建
+- `--dev`：开发者模式
 
 示例：
 
 ```bash
-npm start -- --host-password 12345678 --port 8080
+npm start -- --host-password my-secret-1 --port 8080
 ```
 
 ## 环境变量
 
 ### 常用
 
-| 变量名          | 默认值     | 说明                   |
-| --------------- | ---------- | ---------------------- |
-| `HOST_PASSWORD` | `12345678` | 主持人口令             |
-| `LAN_PORT`      | `8080`     | CLI 启动时前端访问端口 |
+| 变量名          | 默认值     | 说明                                       |
+| --------------- | ---------- | ------------------------------------------ |
+| `HOST_PASSWORD` | `12345678` | 主持人口令（生产环境必填，至少 6 位）      |
+| `LAN_PORT`      | `8080`     | CLI 启动时访问端口（生产模式即服务端端口） |
 
 ### 后端运行时
 
-| 变量名                                 | 默认值         | 说明                               |
-| -------------------------------------- | -------------- | ---------------------------------- |
-| `HOST`                                 | `0.0.0.0`      | 后端绑定地址                       |
-| `PORT`                                 | `3001`         | 后端端口                           |
-| `MAX_PARTICIPANTS_PER_ROOM`            | `50`           | 新建房间默认人数上限（不含主持人） |
-| `DISCONNECT_GRACE_MS`                  | `300000`       | 断线保留窗口（ms）                 |
-| `ROOM_CLEANUP_INTERVAL_MS`             | `30000`        | 断线清理轮询间隔（ms）             |
-| `SOCKET_PING_INTERVAL_MS`              | `10000`        | Socket.IO ping 周期（ms）          |
-| `SOCKET_PING_TIMEOUT_MS`               | `10000`        | Socket.IO ping 超时（ms）          |
-| `TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS` | `60`           | Ticket 校验接口限流阈值（每窗口）  |
-| `IMAGE_UPLOAD_RATE_LIMIT_MAX_REQUESTS` | `30`           | 图片上传接口限流阈值（每窗口）     |
-| `CORS_ALLOW_ORIGIN`                    | 非生产默认 `*` | 允许的 CORS 来源                   |
-| `TRUST_PROXY`                          | `false`        | Express trust proxy 设置           |
+| 变量名                                 | 默认值      | 说明                                                                 |
+| -------------------------------------- | ----------- | -------------------------------------------------------------------- |
+| `HOST`                                 | `0.0.0.0`   | 后端绑定地址                                                         |
+| `PORT`                                 | `3001`      | 后端端口                                                             |
+| `MAX_PARTICIPANTS_PER_ROOM`            | `50`        | 新建房间默认人数上限（不含主持人）                                   |
+| `DISCONNECT_GRACE_MS`                  | `300000`    | 断线保留窗口（ms）                                                   |
+| `ROOM_CLEANUP_INTERVAL_MS`             | `30000`     | 断线清理轮询间隔（ms）                                               |
+| `SOCKET_PING_INTERVAL_MS`              | `10000`     | Socket.IO ping 周期（ms）                                            |
+| `SOCKET_PING_TIMEOUT_MS`               | `10000`     | Socket.IO ping 超时（ms）                                            |
+| `TICKET_CHECK_RATE_LIMIT_MAX_REQUESTS` | `300`       | Ticket 校验接口限流阈值（每分钟，按 NAT 规模放宽）                   |
+| `IMAGE_UPLOAD_RATE_LIMIT_MAX_REQUESTS` | `30`        | 图片上传接口限流阈值（每分钟/每票据）                                |
+| `CORS_ALLOW_ORIGIN`                    | 见说明      | 允许的 CORS 来源；单端口自托管默认放行同源，公网反代部署必须显式配置 |
+| `TRUST_PROXY`                          | `false`     | Express trust proxy 设置                                             |
+| `SOCKET_MAX_HTTP_BUFFER_SIZE`          | `10000000`  | Socket 单包上限（字节）                                              |
+| `MAX_PAGE_CONTENT_CANVAS_BYTES`        | `8000000`   | 单页画布内容上限（字节）                                             |
+| `MAX_PAGE_CONTENT_TEXT_BYTES`          | `64000`     | 单页文本类内容上限（字节）                                           |
+| `IMAGE_UPLOAD_MAX_BYTES`               | `4000000`   | 单张图片上传上限（字节）                                             |
+| `MAX_ROOM_ASSETS_BYTES`                | `268435456` | 单房间上传资产总配额（字节）                                         |
+| `SOCKET_EVENT_RATE_LIMIT_MAX`          | `180`       | 单连接事件限流（每 10 秒窗口）                                       |
+| `CREATE_PASSWORD_MAX_FAILURES`         | `10`        | 口令连续错误锁定阈值（按 IP，5 分钟窗口）                            |
+| `CREATE_PASSWORD_LOCKOUT_MS`           | `300000`    | 口令爆破锁定时长（ms）                                               |
+| `HOST_PASSWORD_MIN_LENGTH`             | `6`         | 口令最小长度                                                         |
+| `ALLOW_SVG_UPLOAD`                     | 关闭        | 设为 `1` 允许上传 SVG（有脚本风险，已加 CSP 沙箱）                   |
 
 说明：
 
@@ -213,17 +234,18 @@ npm start -- --host-password 12345678 --port 8080
 
 - `GET /health`
 - `GET /api/room/current`
-- `GET /api/room/ticket-check?ticket=...`
+- `POST /api/room/ticket-check`（body: `{ "ticket": "TKT-..." }`）
 - `POST /api/uploads/image`
-- `GET /uploads/:roomId/:fileName`
+- `POST /api/uploads/template-asset`
+- `GET /uploads/:roomId/:fileName`（响应带 `CSP: sandbox`，SVG 强制下载）
 
 核心 Socket 事件：
 
-- 房间生命周期：`room:create` / `room:join` / `room:reconnect` / `room:leave` / `room:end`
+- 房间生命周期：`room:create` / `room:join` / `room:reconnect` / `room:leave` / `room:end` / `room:kick`（主持人移出参与者）
 - 主持控制：`control:start-live` / `control:return-setup` / `control:next` / `control:prev`
 - 编排相关：`pages:update` / `page:update` / `layout:import`
 - 互动提交：`work:submit` / `upload:revert`
-- 服务端推送：`state:sync` / `room:closed`
+- 服务端推送：`state:sync`（不含页面内容）/ `content:update`（内容增量）/ `content:reset`（内容全量重置）/ `room:closed` / `room:kicked` / `rate:limited`
 
 ## 压测脚本
 

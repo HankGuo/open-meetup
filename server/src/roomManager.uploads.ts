@@ -1,5 +1,10 @@
 import { randomUUID } from 'crypto';
 import { AssetStorage } from './assetStorage';
+import {
+  ALLOW_SVG_UPLOAD,
+  MAX_IMAGE_UPLOAD_BYTES as CONFIG_IMAGE_UPLOAD_MAX_BYTES,
+  MAX_ROOM_ASSETS_BYTES,
+} from './config';
 import { ParticipantWorks, Room } from './types';
 import {
   isValidSubmissionForMode,
@@ -7,10 +12,11 @@ import {
   normalizeManagedUploadPath,
   resolveImageExtensionByMime,
   sanitizeManagedUploadUrl,
+  sniffImageMimeFromBuffer,
   UPLOAD_URL_PREFIX,
 } from './roomManager.validation';
 
-export const MAX_IMAGE_UPLOAD_BYTES = 4_000_000;
+export const MAX_IMAGE_UPLOAD_BYTES = CONFIG_IMAGE_UPLOAD_MAX_BYTES;
 
 export async function persistImageUpload(
   assetStorage: AssetStorage,
@@ -27,8 +33,32 @@ export async function persistImageUpload(
   }
 
   const mimeType = normalizeImageMimeType(mimeTypeInput);
-  const extension = resolveImageExtensionByMime(mimeType);
+  // 按魔数核实真实类型；Content-Type 头可以被任意伪造
+  const sniffedMime = sniffImageMimeFromBuffer(bufferInput);
+  if (!sniffedMime || !mimeType.startsWith('image/')) {
+    return null;
+  }
+  if (sniffedMime === 'image/svg+xml') {
+    // SVG 可内嵌脚本且会被浏览器按文档渲染，默认禁止；声明类型与真实类型不一致时同样拒绝
+    if (!ALLOW_SVG_UPLOAD || mimeType !== 'image/svg+xml') {
+      return null;
+    }
+  } else if (sniffedMime !== mimeType && !(sniffedMime === 'image/jpeg' && mimeType === 'image/jpg')) {
+    return null;
+  }
+
+  const extension = resolveImageExtensionByMime(sniffedMime);
   if (!extension) {
+    return null;
+  }
+
+  // 上传前检查房间资产配额，防止持续上传写满主持人磁盘
+  try {
+    const usedBytes = await assetStorage.getRoomSizeBytes(room.id);
+    if (usedBytes + bufferInput.length > MAX_ROOM_ASSETS_BYTES) {
+      return null;
+    }
+  } catch {
     return null;
   }
 
@@ -38,7 +68,7 @@ export async function persistImageUpload(
       roomId: room.id,
       fileName,
       buffer: bufferInput,
-      contentType: mimeType,
+      contentType: sniffedMime,
     });
   } catch {
     return null;

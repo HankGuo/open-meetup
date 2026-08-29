@@ -60,7 +60,14 @@ interface StateSyncEvent {
   currentStep: number;
   hostId: string;
   pages: MeetingPageDefinition[];
-  pageContents?: Array<[string, { type: 'canvas' | 'image' | 'url' | 'html' | 'markdown'; content: string }]>;
+}
+
+interface ContentUpdateEvent {
+  entries: Array<[string, PageContent | null]>;
+}
+
+interface ContentResetEvent {
+  pageContents?: Array<[string, PageContent]>;
 }
 
 export function MeetingProvider({ children }: MeetingProviderProps) {
@@ -471,6 +478,23 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     [safeEmit],
   );
 
+  const kickParticipant = useCallback(
+    async (targetUserId: string): Promise<boolean> => {
+      const response = (await safeEmit('room:kick', {
+        userId: targetUserId,
+      })) as SocketResponse<{ kickedUserId: string }> | null;
+      if (!response) {
+        return false;
+      }
+      if (!response.success) {
+        handleSocketFailure(response.error, '移出参与者失败');
+        return false;
+      }
+      return true;
+    },
+    [handleSocketFailure, safeEmit],
+  );
+
   useEffect(() => {
     const onConnect = () => {
       setIsConnected(true);
@@ -489,7 +513,49 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
       setPhase(data.phase);
       setCurrentStep(data.currentStep);
       setPages(data.pages);
-      setPageContents(new Map(data.pageContents ?? []));
+    };
+
+    // 内容增量同步：仅应用变更的页面，避免大画布全量重建
+    const onContentUpdate = (data: ContentUpdateEvent) => {
+      const entries = Array.isArray(data?.entries) ? data.entries : [];
+      if (entries.length === 0) {
+        return;
+      }
+      setPageContents((prev) => {
+        const next = new Map(prev);
+        for (const [pageId, content] of entries) {
+          if (!pageId) {
+            continue;
+          }
+          if (content === null) {
+            next.delete(pageId);
+          } else {
+            next.set(pageId, content);
+          }
+        }
+        return next;
+      });
+    };
+
+    const onContentReset = (data: ContentResetEvent) => {
+      setPageContents(new Map(data?.pageContents ?? []));
+    };
+
+    let rateLimitedNotifiedAt = 0;
+    const onRateLimited = () => {
+      const now = Date.now();
+      if (now - rateLimitedNotifiedAt < 5_000) {
+        return;
+      }
+      rateLimitedNotifiedAt = now;
+      setError('操作过于频繁，请稍后再试');
+    };
+
+    const onKicked = () => {
+      clearAllLocalStorage();
+      resetRoomState();
+      clearSession();
+      setError('你已被主持人移出房间');
     };
 
     const onRoomClosed = (data: { reason: string }) => {
@@ -502,12 +568,20 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('state:sync', onStateSync);
+    socket.on('content:update', onContentUpdate);
+    socket.on('content:reset', onContentReset);
+    socket.on('rate:limited', onRateLimited);
+    socket.on('room:kicked', onKicked);
     socket.on('room:closed', onRoomClosed);
 
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('state:sync', onStateSync);
+      socket.off('content:update', onContentUpdate);
+      socket.off('content:reset', onContentReset);
+      socket.off('rate:limited', onRateLimited);
+      socket.off('room:kicked', onKicked);
       socket.off('room:closed', onRoomClosed);
     };
   }, [clearSession, reconnectWithSession, resetRoomState, socket]);
@@ -547,6 +621,7 @@ export function MeetingProvider({ children }: MeetingProviderProps) {
     importLayoutTemplate,
     submitMyWork,
     revertUploadedImage,
+    kickParticipant,
     clearError,
   };
 
@@ -570,6 +645,9 @@ function mapRoomClosedReason(reason: string): string {
   }
   if (reason === 'HOST_TIMEOUT') {
     return '主持人离线超时，房间已关闭';
+  }
+  if (reason === 'SERVER_SHUTDOWN') {
+    return '服务器已关闭，房间结束';
   }
   return '房间已关闭';
 }

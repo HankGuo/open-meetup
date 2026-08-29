@@ -23,6 +23,8 @@ export interface AssetStorage {
   getObject(roomId: string, fileName: string): Promise<StoredAsset | null>;
   deleteObject(roomId: string, fileName: string): Promise<void>;
   deleteRoom(roomId: string): Promise<void>;
+  /** 统计房间资产目录总字节数，用于上传配额控制 */
+  getRoomSizeBytes(roomId: string): Promise<number>;
 }
 
 export class LocalAssetStorage implements AssetStorage {
@@ -96,6 +98,38 @@ export class LocalAssetStorage implements AssetStorage {
       return;
     }
     await fs.promises.rm(roomDir, { recursive: true, force: true });
+  }
+
+  async getRoomSizeBytes(roomId: string): Promise<number> {
+    const safeRoomId = sanitizeRoomId(roomId);
+    if (!safeRoomId) {
+      return 0;
+    }
+    const roomDir = path.resolve(this.normalizedUploadRoot, safeRoomId);
+    if (!isSubPath(this.normalizedUploadRoot, roomDir)) {
+      return 0;
+    }
+
+    let total = 0;
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(roomDir, { withFileTypes: true });
+    } catch (error) {
+      if (isFileNotFound(error)) {
+        return 0;
+      }
+      throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      try {
+        const stat = await fs.promises.stat(path.join(roomDir, entry.name));
+        total += stat.size;
+      } catch {}
+    }
+    return total;
   }
 }
 

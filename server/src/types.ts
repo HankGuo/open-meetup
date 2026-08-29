@@ -2,7 +2,7 @@ export type UserRole = 'host' | 'participant';
 export type MeetingStatus = 'active' | 'ended';
 export type MeetingPhase = 'setup' | 'live';
 
-export type RoomCloseReason = 'HOST_LEFT' | 'HOST_ENDED' | 'HOST_TIMEOUT';
+export type RoomCloseReason = 'HOST_LEFT' | 'HOST_ENDED' | 'HOST_TIMEOUT' | 'SERVER_SHUTDOWN';
 
 export interface ParticipantWorkSubmission {
   url: string;
@@ -101,6 +101,8 @@ export interface ErrorResponse {
     | 'SESSION_EXPIRED'
     | 'ROOM_NOT_ACTIVE'
     | 'USER_NOT_FOUND'
+    | 'SESSION_ACTIVE'
+    | 'RATE_LIMITED'
     | 'INTERNAL_ERROR';
 }
 

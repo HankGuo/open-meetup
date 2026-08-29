@@ -328,6 +328,13 @@ test('socket-level authorization should invalidate stale socket after ticket res
     sessionId: firstJoin.data.sessionId,
   };
 
+  // 旧连接仍在线时，票据不允许被第二个连接抢占（防止幽灵标签页）
+  const hijackAttempt = manager.joinRoom('', 'socket-b', firstJoin.data.ticket);
+  assert.equal(hijackAttempt.success, false);
+  assert.equal(hijackAttempt.error.code, 'SESSION_ACTIVE');
+
+  // 旧连接断开后，票据恢复身份
+  manager.onSocketDisconnected('socket-a');
   const secondJoin = manager.joinRoom('', 'socket-b', firstJoin.data.ticket);
   assert.equal(secondJoin.success, true);
   const activeIdentity = {

@@ -15,7 +15,7 @@ import {
 } from './types';
 import {
   DISCONNECT_GRACE_MS,
-  HOST_PASSWORD,
+  verifyHostPassword,
   ROOM_PARTICIPANT_LIMIT_MAX,
   ROOM_PARTICIPANT_LIMIT_MIN,
 } from './config';
@@ -24,6 +24,9 @@ import { createDefaultMeetingPages, MAX_MEETING_PAGES } from './meetingConfig';
 import { AssetStorage, createAssetStorage } from './assetStorage';
 import {
   getParticipantAudienceCount,
+  isPageContentSizeValid,
+  isPageContentTypeValid,
+  isUserNameTaken,
   normalizeTicket,
   sanitizeHttpWorkUrl,
   sanitizeLayoutTemplateInput,
@@ -129,7 +132,7 @@ export class RoomManager {
       );
     }
 
-    if (password !== HOST_PASSWORD) {
+    if (!verifyHostPassword(password)) {
       return this.fail('密码错误', 'INVALID_PASSWORD');
     }
 
@@ -185,8 +188,6 @@ export class RoomManager {
       return this.fail('房间已关闭', 'ROOM_CLOSED');
     }
 
-    this.detachSocket(socketId);
-
     const requestedTicket = typeof ticket === 'string' ? normalizeTicket(ticket) : '';
     if (ticket != null && !requestedTicket) {
       return this.fail('无效的 Ticket', 'INVALID_TICKET');
@@ -198,9 +199,18 @@ export class RoomManager {
         return this.fail('无效的 Ticket', 'INVALID_TICKET');
       }
 
+      // 同一身份已在其他在线连接上使用时拒绝抢占：
+      // 否则后开的标签页会静默顶掉先开页面的会话，使其变成收不到任何同步的"幽灵"页面
+      if (participant.online && participant.socketId && participant.socketId !== socketId) {
+        return this.fail('该身份已在其他标签页或设备上使用，请先关闭后再加入', 'SESSION_ACTIVE');
+      }
+
       if (participant.socketId && participant.socketId !== socketId) {
         this.socketToIdentity.delete(participant.socketId);
       }
+
+      // 校验通过后才剥离旧绑定：失败的加入不应影响该 socket 上的现有会话
+      this.detachSocket(socketId);
 
       const now = Date.now();
       participant.socketId = socketId;
@@ -225,9 +235,15 @@ export class RoomManager {
     if (!userName) {
       return this.fail('用户名无效', 'BAD_REQUEST');
     }
+    if (isUserNameTaken(room, userName)) {
+      return this.fail('该昵称已被使用，请换一个昵称', 'BAD_REQUEST');
+    }
     if (getParticipantAudienceCount(room) >= room.participantLimit) {
       return this.fail('房间已满', 'ROOM_FULL');
     }
+
+    // 校验通过后才剥离旧绑定：失败的加入不应影响该 socket 上的现有会话
+    this.detachSocket(socketId);
 
     const now = Date.now();
     const participant: RoomParticipant = {
@@ -331,6 +347,51 @@ export class RoomManager {
     return {
       ok: true,
       roomClosed: false,
+    };
+  }
+
+  async kickParticipant(
+    identity: SocketIdentity,
+    targetUserIdInput: string,
+  ): Promise<SocketResult<{ kickedUserId: string; targetSocketId: string | null; snapshot: RoomStateSync }>> {
+    const auth = this.authorize(identity);
+    if (!auth) {
+      return this.fail('未认证', 'NOT_AUTHENTICATED');
+    }
+    if (auth.participant.role !== 'host') {
+      return this.fail('仅主持人可移出参与者', 'NOT_AUTHORIZED');
+    }
+
+    const targetUserId = sanitizePageId(targetUserIdInput);
+    if (!targetUserId || targetUserId === auth.participant.userId) {
+      return this.fail('目标参与者无效', 'BAD_REQUEST');
+    }
+
+    const target = auth.room.participants.get(targetUserId);
+    if (!target || target.role !== 'participant') {
+      return this.fail('参与者不存在', 'USER_NOT_FOUND');
+    }
+
+    const now = Date.now();
+    const removedUploadUrls = collectManagedUploadUrlsFromParticipantWorks(target.works, auth.room.id);
+    const targetSocketId = target.socketId;
+
+    auth.room.participants.delete(targetUserId);
+    auth.room.updatedAt = now;
+    if (targetSocketId) {
+      this.socketToIdentity.delete(targetSocketId);
+    }
+
+    await cleanupUploadUrls(this.assetStorage, auth.room, removedUploadUrls);
+    this.store.saveRoom(auth.room);
+
+    return {
+      success: true,
+      data: {
+        kickedUserId: targetUserId,
+        targetSocketId,
+        snapshot: toRoomStateSync(auth.room, auth.participant),
+      },
     };
   }
 
@@ -457,6 +518,15 @@ export class RoomManager {
     }
     if (!auth.room.pages.some((page) => page.id === normalizedPageId)) {
       return this.fail('页面不存在', 'BAD_REQUEST');
+    }
+
+    if (content !== null) {
+      if (!isPageContentTypeValid(content.type)) {
+        return this.fail('内容类型不合法', 'BAD_REQUEST');
+      }
+      if (!isPageContentSizeValid(content)) {
+        return this.fail('内容体积超出限制，请精简后再保存', 'BAD_REQUEST');
+      }
     }
 
     if (content === null) {

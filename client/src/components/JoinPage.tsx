@@ -34,9 +34,14 @@ export function JoinPage() {
 
   async function verifyTicket(ticketToVerify: string): Promise<TicketCheckResult> {
     try {
-      const response = await fetch(
-        `${buildServerApiUrl('/api/room/ticket-check')}?ticket=${encodeURIComponent(ticketToVerify)}`,
-      );
+      const response = await fetch(buildServerApiUrl('/api/room/ticket-check'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket: ticketToVerify }),
+      });
+      if (response.status === 429) {
+        return { valid: false, error: '校验请求过于频繁，请稍后再试' };
+      }
       if (!response.ok) {
         const failed = (await response.json()) as TicketCheckResult;
         return {

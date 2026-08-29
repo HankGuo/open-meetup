@@ -44,7 +44,7 @@ export function createNewPage(
   };
 }
 
-function createPageId(): string {
+export function createPageId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `page-${crypto.randomUUID()}`;
   }

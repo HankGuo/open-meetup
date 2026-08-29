@@ -31,3 +31,10 @@ tmp/
 .claude/
 server/node_modules
 dist-electron-old2/
+
+# test artifacts
+server/test/__tmp__/
+server/test/__tmp-security__/
+.open-meetup.pid
+.logs/
+server/uploads/

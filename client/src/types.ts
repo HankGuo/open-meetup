@@ -32,6 +32,9 @@ export interface LayoutTemplate {
   pages: MeetingPageDefinition[];
   pageContents?: Array<[string, PageContent]>;
   exportedAt?: string;
+  /** 以下为模板元数据：服务端会忽略，仅用于模板库展示 */
+  name?: string;
+  app?: string;
 }
 
 export interface User {
@@ -83,5 +86,6 @@ export interface MeetingContextType extends RoomState {
   importLayoutTemplate: (template: LayoutTemplate) => Promise<boolean>;
   submitMyWork: (pageId: string, url: string, description: string) => Promise<boolean>;
   revertUploadedImage: (url: string) => Promise<void>;
+  kickParticipant: (targetUserId: string) => Promise<boolean>;
   clearError: () => void;
 }
